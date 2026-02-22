@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, safeStorage, nativeImage } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -116,7 +117,6 @@ app.whenReady().then(() => {
   // 启动后 5 秒自动检查更新（生产环境）
   if (!VITE_DEV_SERVER_URL) {
     setTimeout(() => {
-      const { autoUpdater } = require('electron-updater')
       console.log('[Auto Update] Checking for updates...')
       autoUpdater.checkForUpdates().catch((err: Error) => {
         console.error('[Auto Update] Check failed:', err.message)
