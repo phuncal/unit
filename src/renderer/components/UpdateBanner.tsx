@@ -27,10 +27,12 @@ export function UpdateBanner() {
       setUpdateReady(true)
     })
 
-    // 监听错误
-    const unsubscribeError = window.api.updater.onError(() => {
+    // 监听错误（静默处理，不显示给用户）
+    const unsubscribeError = window.api.updater.onError((error) => {
+      console.log('[UpdateBanner] Update check error (silently ignored):', error)
       setIsDownloading(false)
       setDownloadProgress(null)
+      // 404 错误是正常的（还没有发布 Release），不显示错误提示
     })
 
     return () => {

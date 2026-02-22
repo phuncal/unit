@@ -154,7 +154,18 @@ export function SettingsPanel() {
     setUpdateError(null)
     const result = await window.api.updater.check()
     if (!result.success && result.error) {
-      setUpdateError(result.error)
+      // 将技术错误转换为用户友好的提示
+      let userFriendlyError = result.error
+
+      if (result.error.includes('404')) {
+        userFriendlyError = '无法检查更新，可能原因：\n1. GitHub 仓库尚未发布任何 Release\n2. 网络连接问题\n\n请稍后重试或手动访问项目页面。'
+      } else if (result.error.includes('ENOTFOUND') || result.error.includes('network')) {
+        userFriendlyError = '网络连接失败，请检查网络设置后重试。'
+      } else if (result.error.includes('timeout')) {
+        userFriendlyError = '请求超时，请稍后重试。'
+      }
+
+      setUpdateError(userFriendlyError)
     }
   }
 
@@ -522,7 +533,9 @@ export function SettingsPanel() {
 
               {/* 错误提示 */}
               {updateError && (
-                <p className="text-xs text-warning">{updateError}</p>
+                <div className="p-3 bg-warning/10 rounded border border-warning/30">
+                  <p className="text-xs text-warning whitespace-pre-line">{updateError}</p>
+                </div>
               )}
             </div>
           </div>
