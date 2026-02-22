@@ -25,6 +25,37 @@ const api = {
     create: (projectPath, initialContent) => ipcRenderer.invoke('archive:create', projectPath, initialContent),
     exists: (projectPath) => ipcRenderer.invoke('archive:exists', projectPath),
   },
+  // 更新相关
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    download: () => ipcRenderer.invoke('updater:download'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    getCurrentVersion: () => ipcRenderer.invoke('updater:current-version'),
+    onChecking: (callback) => {
+      ipcRenderer.on('updater:checking', callback)
+      return () => ipcRenderer.removeListener('updater:checking', callback)
+    },
+    onAvailable: (callback) => {
+      ipcRenderer.on('updater:available', (_event, info) => callback(info))
+      return () => ipcRenderer.removeListener('updater:available', callback)
+    },
+    onNotAvailable: (callback) => {
+      ipcRenderer.on('updater:not-available', callback)
+      return () => ipcRenderer.removeListener('updater:not-available', callback)
+    },
+    onProgress: (callback) => {
+      ipcRenderer.on('updater:progress', (_event, progress) => callback(progress))
+      return () => ipcRenderer.removeListener('updater:progress', callback)
+    },
+    onDownloaded: (callback) => {
+      ipcRenderer.on('updater:downloaded', callback)
+      return () => ipcRenderer.removeListener('updater:downloaded', callback)
+    },
+    onError: (callback) => {
+      ipcRenderer.on('updater:error', (_event, error) => callback(error))
+      return () => ipcRenderer.removeListener('updater:error', callback)
+    },
+  },
   // API 请求（绕过 CORS）
   http: {
     // 非流式请求
