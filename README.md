@@ -1,30 +1,29 @@
-# React + TypeScript + Vite
+# Unit
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+macOS 桌面聊天工具，专为与 AI 深度讨论游戏、影视、文学作品的设定内容而设计。
 
-Currently, two official plugins are available:
+## 特性
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- 兼容 OpenAI 格式的流式接口
+- 设定档案系统（archive.md）
+- 滑动窗口上下文，优化长对话成本
+- 发送前费用预估与累计统计
+- 对话模板与消息锚点
+- 图片支持与双版本导出
 
-## Expanding the ESLint configuration
+## 技术栈
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+Electron + React + TypeScript + Tailwind CSS + IndexedDB (Dexie.js)
 
-- Configure the top-level `parserOptions` property like this:
+## 开发
 
-```js
-export default {
-  // other rules...
-  parserOptions: {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    project: ['./tsconfig.json', './tsconfig.node.json'],
-    tsconfigRootDir: __dirname,
-  },
-}
+```bash
+npm install
+npm run dev
 ```
 
-- Replace `plugin:@typescript-eslint/recommended` to `plugin:@typescript-eslint/recommended-type-checked` or `plugin:@typescript-eslint/strict-type-checked`
-- Optionally add `plugin:@typescript-eslint/stylistic-type-checked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and add `plugin:react/recommended` & `plugin:react/jsx-runtime` to the `extends` list
+## 构建
+
+```bash
+npm run build:mac
+```
