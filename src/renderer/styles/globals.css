@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+@theme {
+  /* 背景色 */
+  --color-bg-primary: #F5F5F0;
+  --color-bg-secondary: #EEEDE8;
+  --color-bg-tertiary: #E5E4E0;
+
+  /* 边框 */
+  --color-border: #D8D6D0;
+
+  /* 文字 */
+  --color-text-primary: #1A1A18;
+  --color-text-secondary: #8A8880;
+
+  /* 强调色 */
+  --color-accent: #3D6B5E;
+  --color-accent-hover: #2E5248;
+
+  /* 警告色 */
+  --color-warning: #B85C38;
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  --font-mono: "SF Mono", Menlo, Monaco, "Courier New", monospace;
+
+  /* 过渡 */
+  --duration-fast: 120ms;
+  --duration-normal: 240ms;
+  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+:root {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* macOS 标题栏拖拽区域 */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 2px;
+}
+
+:hover::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+}
+
+:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+/* 输入框样式 */
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  outline: none;
+  background: transparent;
+  border: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-secondary);
+}
+
+/* 按钮基础样式 */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* 禁用状态 */
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 选中文本 */
+::selection {
+  background-color: rgba(61, 107, 94, 0.2);
+}
+
+/* 过渡动画 */
+.transition-fast {
+  transition-duration: 120ms;
+  transition-timing-function: var(--ease-default);
+}
+
+.transition-normal {
+  transition-duration: 240ms;
+  transition-timing-function: var(--ease-default);
+}
