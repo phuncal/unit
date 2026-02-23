@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Plus, Settings as SettingsIcon, MessageSquare, Trash2, Edit2, FolderOpen } from 'lucide-react'
+import { Plus, Settings as SettingsIcon, MessageSquare, Trash2, Edit2, FolderOpen, LayoutTemplate, DollarSign } from 'lucide-react'
 import { useSettingsStore } from '@/store/settings'
 import { useConversationsStore } from '@/store/conversations'
+import { TemplateManager } from '@/components/TemplateManager'
+import { UsageStatsPanel } from '@/components/UsageStatsPanel'
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now()
@@ -22,12 +24,10 @@ export function Sidebar() {
   const {
     conversations,
     currentConversation,
-    loadConversations,
     createConversation,
     selectConversation,
     deleteConversation,
     templates,
-    loadTemplates,
   } = useConversationsStore()
 
   const [showNewDialog, setShowNewDialog] = useState(false)
@@ -41,11 +41,22 @@ export function Sidebar() {
   } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
+  const [showTemplateManager, setShowTemplateManager] = useState(false)
+  const [showUsageStats, setShowUsageStats] = useState(false)
 
   useEffect(() => {
-    loadConversations()
-    loadTemplates()
-  }, [loadConversations, loadTemplates])
+    const init = async () => {
+      const store = useConversationsStore.getState()
+      await store.loadConversations()
+      store.loadTemplates()
+      // 重启后自动选中最近更新的对话，恢复历史消息
+      const updatedStore = useConversationsStore.getState()
+      if (!updatedStore.currentConversation && updatedStore.conversations.length > 0) {
+        await updatedStore.selectConversation(updatedStore.conversations[0].id)
+      }
+    }
+    init()
+  }, [])
 
   const handleNewConversation = async () => {
     if (!newConversationName.trim()) return
@@ -187,14 +198,29 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* 设置按钮 */}
-      <div className="border-t border-border/50 p-3">
+      {/* 底部工具栏 */}
+      <div className="border-t border-border/50 p-3 flex items-center gap-1">
         <button
           onClick={() => setSettingsPanelOpen(true)}
-          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-bg-tertiary/80 active:scale-[0.98] transition-all duration-120 text-text-secondary/70 hover:text-text-primary"
+          className="flex-1 flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-bg-tertiary/80 active:scale-[0.98] transition-all duration-120 text-text-secondary/70 hover:text-text-primary"
+          title="设置"
         >
           <SettingsIcon className="w-[15px] h-[15px]" />
           <span className="text-[13px]">设置</span>
+        </button>
+        <button
+          onClick={() => setShowTemplateManager(true)}
+          className="p-2.5 rounded-lg hover:bg-bg-tertiary/80 active:scale-[0.98] transition-all duration-120 text-text-secondary/70 hover:text-text-primary"
+          title="对话模板"
+        >
+          <LayoutTemplate className="w-[15px] h-[15px]" />
+        </button>
+        <button
+          onClick={() => setShowUsageStats(true)}
+          className="p-2.5 rounded-lg hover:bg-bg-tertiary/80 active:scale-[0.98] transition-all duration-120 text-text-secondary/70 hover:text-text-primary"
+          title="费用统计"
+        >
+          <DollarSign className="w-[15px] h-[15px]" />
         </button>
       </div>
 
@@ -296,6 +322,18 @@ export function Sidebar() {
           </div>
         </>
       )}
+
+      {/* 模板管理面板 */}
+      <TemplateManager
+        isOpen={showTemplateManager}
+        onClose={() => setShowTemplateManager(false)}
+      />
+
+      {/* 费用统计面板 */}
+      <UsageStatsPanel
+        isOpen={showUsageStats}
+        onClose={() => setShowUsageStats(false)}
+      />
     </div>
   )
 }

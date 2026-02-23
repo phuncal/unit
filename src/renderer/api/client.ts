@@ -173,6 +173,9 @@ function formatMessages(
       }
     }
 
+    // 跳过空内容消息（如纯图片消息在不支持视觉的模型下）
+    if (content.length === 0) continue
+
     formatted.push({
       role: msg.role,
       content: content.length === 1 && content[0].type === 'text'

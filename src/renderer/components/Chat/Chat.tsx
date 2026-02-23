@@ -1,11 +1,13 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Send, Image as ImageIcon, Pin, Trash2, RefreshCw, Settings, FileText, Download, ChevronDown, GitBranch, Paperclip } from 'lucide-react'
+import { Send, Image as ImageIcon, Pin, Trash2, RefreshCw, Settings, FileText, Download, ChevronDown, GitBranch, Paperclip, ListFilter } from 'lucide-react'
 import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
 import { useChat } from '@/hooks/useChat'
 import { useExport } from '@/hooks/useExport'
 import { ChatSearch } from './ChatSearch'
+import { ContextSelector } from './ContextSelector'
+import { useArchiveMention, ArchiveMentionPicker } from './useArchiveMention'
 import type { Message, ContentBlock } from '@/types'
 
 // 高亮搜索关键词
@@ -174,6 +176,8 @@ export function Chat() {
   const [pendingImages, setPendingImages] = useState<ContentBlock[]>([])
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null)
+  const [showContextSelector, setShowContextSelector] = useState(false)
+  const [manualContextIds, setManualContextIds] = useState<string[] | null>(null)
 
   // 长内容导出提示
   const [longContentPrompt, setLongContentPrompt] = useState<{
@@ -193,6 +197,19 @@ export function Chat() {
 
   const parentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // @ 引用档案条目
+  const { showPicker, pickerPosition, filteredEntries, selectedIndex, selectEntry } = useArchiveMention({
+    input,
+    inputRef: textareaRef,
+    onInsert: (text) => {
+      // 将 @ 及其后面的搜索词替换为选中的条目内容
+      const lastAtIndex = input.lastIndexOf('@')
+      if (lastAtIndex !== -1) {
+        setInput(input.slice(0, lastAtIndex) + text)
+      }
+    },
+  })
 
   // 检测流式响应完成，若内容超过500字则提示导出
   useEffect(() => {
@@ -287,9 +304,29 @@ export function Chat() {
       content.push({ type: 'text', text: input.trim() })
     }
 
-    await sendMessage(content)
+    await sendMessage(content, manualContextIds ?? undefined)
     setInput('')
     setPendingImages([])
+    setManualContextIds(null)
+  }
+
+  const handleContextSelectorConfirm = async (selectedIds: string[]) => {
+    setManualContextIds(selectedIds)
+    setShowContextSelector(false)
+    // 直接触发发送，此时 manualContextIds 会在下一次渲染生效
+    // 用 ref 存储以确保立即可用
+    if (!input.trim() && pendingImages.length === 0) return
+    if (!canSend) return
+
+    const content: ContentBlock[] = [...pendingImages]
+    if (input.trim()) {
+      content.push({ type: 'text', text: input.trim() })
+    }
+
+    await sendMessage(content, selectedIds)
+    setInput('')
+    setPendingImages([])
+    setManualContextIds(null)
   }
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -711,6 +748,19 @@ export function Chat() {
                   disabled={!canSend || isStreaming}
                 />
               </label>
+              {/* 手动选择上下文 */}
+              {currentConversation && currentConversation.messages.length > 0 && (
+                <button
+                  onClick={() => setShowContextSelector(true)}
+                  disabled={isStreaming}
+                  className={`p-2 rounded-lg hover:bg-bg-tertiary transition-all duration-120 disabled:opacity-40 ${
+                    manualContextIds ? 'text-accent' : 'text-text-secondary/60 hover:text-text-secondary'
+                  }`}
+                  title={manualContextIds ? `已手动选择 ${manualContextIds.length} 条上下文` : '选择发送的上下文'}
+                >
+                  <ListFilter className="w-[18px] h-[18px]" />
+                </button>
+              )}
               <button
                 onClick={handleSend}
                 disabled={!canSend || isStreaming || (!input.trim() && pendingImages.length === 0)}
@@ -826,6 +876,22 @@ export function Chat() {
           </div>
         </div>
       )}
+
+      {/* 手动上下文选择器 */}
+      <ContextSelector
+        isOpen={showContextSelector}
+        onClose={() => setShowContextSelector(false)}
+        onConfirm={handleContextSelectorConfirm}
+      />
+
+      {/* @ 引用档案条目选择器 */}
+      <ArchiveMentionPicker
+        show={showPicker}
+        position={pickerPosition}
+        entries={filteredEntries}
+        selectedIndex={selectedIndex}
+        onSelect={selectEntry}
+      />
     </div>
   )
 }

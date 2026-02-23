@@ -99,7 +99,7 @@ export function useChat() {
     )
   }, [contextMessages, settings.modelName])
 
-  const sendMessage = useCallback(async (content: ContentBlock[]) => {
+  const sendMessage = useCallback(async (content: ContentBlock[], overrideContextIds?: string[]) => {
     if (!currentConversation || isStreaming) return
 
     // 检查是否包含图片且模型不支持视觉
@@ -110,19 +110,36 @@ export function useChat() {
 
     const startTime = Date.now()
 
+    // 在添加新消息之前，先快照当前历史消息
+    const historyMessages = currentConversation.messages
+
     try {
-      // 1. 添加用户消息
+      // 1. 添加用户消息（持久化到 DB，同时更新 store 用于 UI 渲染）
       await addMessage('user', content)
 
-      // 2. 准备发送给 AI 的消息（包括新添加的用户消息）
-      const updatedConversation = useConversationsStore.getState().currentConversation
-      if (!updatedConversation) return
+      // 2. 构建发送给 AI 的消息列表：历史消息 + 刚写入的新用户消息
+      //    直接用快照 + 新构造的消息对象，不依赖 addMessage 后的 store 状态
+      const newUserMessage = {
+        id: 'pending',
+        role: 'user' as const,
+        content,
+        pinned: false,
+        createdAt: Date.now(),
+      }
+      const allMessages = [...historyMessages, newUserMessage]
 
-      // 3. 应用滑动窗口
-      const messagesToSend = applySlidingWindow(
-        updatedConversation.messages,
-        settings.slidingWindowSize
-      )
+      // 3. 应用上下文：若用户手动选择了消息 ID，则按选择过滤；否则走滑动窗口
+      let messagesToSend
+      if (overrideContextIds) {
+        const idSet = new Set(overrideContextIds)
+        // 历史消息按 ID 过滤，新用户消息始终包含
+        messagesToSend = [
+          ...allMessages.slice(0, -1).filter((m) => idSet.has(m.id)),
+          newUserMessage,
+        ]
+      } else {
+        messagesToSend = applySlidingWindow(allMessages, settings.slidingWindowSize)
+      }
 
       // 4. 构建包含档案的 system prompt
       const fullSystemPrompt = await buildSystemPrompt()

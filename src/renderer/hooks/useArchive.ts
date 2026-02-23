@@ -3,11 +3,13 @@ import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
 import { sendNonStreamMessage } from '@/api/client'
 
-const ARCHIVE_UPDATE_PROMPT = `请分析以上对话，提取出新增的、已明确确认的结论或要点。
+const ARCHIVE_UPDATE_PROMPT = `请分析上面的对话内容，提取出其中新增的、已明确确认的结论或要点。
+
 要求：
-- 只提取结论，不要过程和推论
-- 自由格式输出，内容是什么写什么，不强制分类
-- 如果没有新增结论，返回"无新增内容"`
+- 只提取已确认的结论，不要推论过程
+- 每条结论单独一行，以"- "开头
+- 自由格式，内容是什么写什么，不强制分类
+- 如果对话中没有值得记录的新增结论，只输出"无新增内容"，不要输出其他内容`
 
 export function useArchive() {
   const { currentConversation } = useConversationsStore()
@@ -23,10 +25,23 @@ export function useArchive() {
     setIsUpdating(true)
 
     try {
+      // 将分析指令作为最后一条 user 消息追加到对话末尾
+      // 不能作为 systemPrompt 传入——那样 AI 会把它理解为行为约束而非分析指令
+      const messagesWithPrompt = [
+        ...currentConversation.messages,
+        {
+          id: 'archive-prompt',
+          role: 'user' as const,
+          content: [{ type: 'text' as const, text: ARCHIVE_UPDATE_PROMPT }],
+          pinned: false,
+          createdAt: Date.now(),
+        },
+      ]
+
       const result = await sendNonStreamMessage(
         settings,
-        currentConversation.messages,
-        ARCHIVE_UPDATE_PROMPT
+        messagesWithPrompt,
+        undefined
       )
 
       if (result.trim() === '无新增内容') {
