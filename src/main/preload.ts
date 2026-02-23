@@ -35,7 +35,7 @@ const api = {
   // 更新相关
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
-    download: () => ipcRenderer.invoke('updater:download'),
+    download: (downloadUrl?: string) => ipcRenderer.invoke('updater:download', downloadUrl),
     install: () => ipcRenderer.invoke('updater:install'),
     getCurrentVersion: () => ipcRenderer.invoke('updater:current-version'),
     onChecking: (callback: () => void) => {
@@ -43,24 +43,27 @@ const api = {
       return () => ipcRenderer.removeListener('updater:checking', callback)
     },
     onAvailable: (callback: (info: any) => void) => {
-      ipcRenderer.on('updater:available', (_event, info) => callback(info))
-      return () => ipcRenderer.removeListener('updater:available', callback)
+      const handler = (_event: any, info: any) => callback(info)
+      ipcRenderer.on('updater:available', handler)
+      return () => ipcRenderer.removeListener('updater:available', handler)
     },
     onNotAvailable: (callback: () => void) => {
       ipcRenderer.on('updater:not-available', callback)
       return () => ipcRenderer.removeListener('updater:not-available', callback)
     },
     onProgress: (callback: (progress: any) => void) => {
-      ipcRenderer.on('updater:progress', (_event, progress) => callback(progress))
-      return () => ipcRenderer.removeListener('updater:progress', callback)
+      const handler = (_event: any, progress: any) => callback(progress)
+      ipcRenderer.on('updater:progress', handler)
+      return () => ipcRenderer.removeListener('updater:progress', handler)
     },
     onDownloaded: (callback: () => void) => {
       ipcRenderer.on('updater:downloaded', callback)
       return () => ipcRenderer.removeListener('updater:downloaded', callback)
     },
     onError: (callback: (error: any) => void) => {
-      ipcRenderer.on('updater:error', (_event, error) => callback(error))
-      return () => ipcRenderer.removeListener('updater:error', callback)
+      const handler = (_event: any, error: any) => callback(error)
+      ipcRenderer.on('updater:error', handler)
+      return () => ipcRenderer.removeListener('updater:error', handler)
     },
   },
 

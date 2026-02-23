@@ -53,6 +53,7 @@ export interface UpdateInfo {
   version: string
   releaseDate?: string
   releaseNotes?: string
+  downloadUrl?: string
 }
 
 export interface DownloadProgress {
@@ -83,7 +84,7 @@ export interface ElectronAPI {
   }
   updater: {
     check: () => Promise<UpdaterResult>
-    download: () => Promise<{ success: boolean; error?: string }>
+    download: (downloadUrl?: string) => Promise<{ success: boolean; error?: string }>
     install: () => Promise<void>
     getCurrentVersion: () => Promise<string>
     onChecking: (callback: () => void) => () => void

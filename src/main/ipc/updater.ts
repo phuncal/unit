@@ -1,32 +1,122 @@
-import { ipcMain, BrowserWindow } from 'electron'
-import { autoUpdater } from 'electron-updater'
+import { ipcMain, BrowserWindow, shell, app } from 'electron'
+import https from 'node:https'
 
-// 禁用签名验证（适用于未签名的个人项目）
-// 必须在 autoUpdater 初始化之前设置
-process.env.SHIPIT_SKIP_SIGNING_VALIDATION = '1'
+// 无签名应用的更新方案：
+// 不使用 electron-updater / Squirrel.Mac（会因 ad-hoc 签名每次不同而验证失败）
+// 改为手动检查 GitHub Releases API，发现新版本时引导用户打开下载页面
+// 用户通过 DMG 手动安装新版本，彻底绕过 ShipIt 的签名验证
 
-// 配置自动更新
-autoUpdater.autoDownload = false // 不自动下载，用户手动触发
-autoUpdater.autoInstallOnAppQuit = true // 退出时自动安装
-autoUpdater.disableDifferentialDownload = true // 禁用差异下载，避免签名问题
-autoUpdater.logger = console
+const GITHUB_OWNER = 'phuncal'
+const GITHUB_REPO = 'unit'
 
-// 关键：对于未签名的应用，需要在下载后禁用签名验证
-// 通过监听 update-downloaded 事件，在安装前跳过签名检查
-// 注意：仅适用于个人项目，生产环境应使用正式签名
+interface ReleaseInfo {
+  version: string
+  releaseDate: string
+  releaseNotes: string
+  downloadUrl: string
+}
+
+function fetchLatestRelease(): Promise<ReleaseInfo> {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.github.com',
+      path: `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+      headers: {
+        'User-Agent': 'Unit-App-Updater',
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    }
+
+    const req = https.get(options, (res) => {
+      let data = ''
+      res.on('data', (chunk) => { data += chunk })
+      res.on('end', () => {
+        try {
+          const release = JSON.parse(data)
+          if (release.message) {
+            reject(new Error(release.message))
+            return
+          }
+          const version = release.tag_name?.replace(/^v/, '') ?? ''
+          const dmgAsset = release.assets?.find((a: any) =>
+            a.name?.endsWith('.dmg') && a.name?.includes('universal')
+          )
+          resolve({
+            version,
+            releaseDate: release.published_at ?? '',
+            releaseNotes: typeof release.body === 'string' ? release.body.slice(0, 500) : '',
+            downloadUrl: dmgAsset?.browser_download_url ?? release.html_url,
+          })
+        } catch (e) {
+          reject(e)
+        }
+      })
+    })
+
+    req.on('error', reject)
+    req.setTimeout(10000, () => {
+      req.destroy()
+      reject(new Error('Request timeout'))
+    })
+  })
+}
+
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+// 供主进程启动时直接调用
+export async function checkForUpdates(): Promise<void> {
+  try {
+    const latest = await fetchLatestRelease()
+    const current = app.getVersion()
+    const updateAvailable = compareVersions(latest.version, current) > 0
+
+    if (updateAvailable) {
+      sendToAllWindows('updater:available', {
+        version: latest.version,
+        releaseDate: latest.releaseDate,
+        releaseNotes: latest.releaseNotes,
+        downloadUrl: latest.downloadUrl,
+      })
+    }
+  } catch (error) {
+    console.error('[Updater] Auto check failed:', error)
+  }
+}
 
 export function registerUpdaterHandlers() {
-  // 检查更新
+  // 检查更新（渲染进程手动触发）
   ipcMain.handle('updater:check', async () => {
     try {
-      const result = await autoUpdater.checkForUpdates()
+      const latest = await fetchLatestRelease()
+      const current = app.getVersion()
+      const updateAvailable = compareVersions(latest.version, current) > 0
+
+      if (updateAvailable) {
+        sendToAllWindows('updater:available', {
+          version: latest.version,
+          releaseDate: latest.releaseDate,
+          releaseNotes: latest.releaseNotes,
+          downloadUrl: latest.downloadUrl,
+        })
+      } else {
+        sendToAllWindows('updater:not-available')
+      }
+
       return {
         success: true,
-        updateAvailable: result !== null,
-        version: result?.updateInfo?.version,
+        updateAvailable,
+        version: latest.version,
       }
     } catch (error) {
-      console.error('Check for updates failed:', error)
+      console.error('[Updater] Check failed:', error)
       return {
         success: false,
         error: (error as Error).message,
@@ -34,13 +124,14 @@ export function registerUpdaterHandlers() {
     }
   })
 
-  // 开始下载更新
-  ipcMain.handle('updater:download', async () => {
+  // 打开下载页面（由渲染进程传入 downloadUrl）
+  ipcMain.handle('updater:download', async (_event, downloadUrl?: string) => {
     try {
-      await autoUpdater.downloadUpdate()
+      const latest = downloadUrl ? { downloadUrl } : await fetchLatestRelease()
+      await shell.openExternal(latest.downloadUrl)
       return { success: true }
     } catch (error) {
-      console.error('Download update failed:', error)
+      console.error('[Updater] Open download URL failed:', error)
       return {
         success: false,
         error: (error as Error).message,
@@ -48,52 +139,14 @@ export function registerUpdaterHandlers() {
     }
   })
 
-  // 退出并安装
+  // 保留接口兼容性，无实际操作（用户通过 DMG 手动安装）
   ipcMain.handle('updater:install', () => {
-    // 对于未签名应用，使用这种方式跳过签名验证
-    // Squirrel.msc 会在安装时处理
-    autoUpdater.quitAndInstall(false, true)
+    app.quit()
   })
 
   // 获取当前版本
   ipcMain.handle('updater:current-version', () => {
-    return autoUpdater.currentVersion.version
-  })
-
-  // 监听更新事件，发送到渲染进程
-  autoUpdater.on('checking-for-update', () => {
-    sendToAllWindows('updater:checking')
-  })
-
-  autoUpdater.on('update-available', (info) => {
-    sendToAllWindows('updater:available', {
-      version: info.version,
-      releaseDate: info.releaseDate,
-      releaseNotes: info.releaseNotes,
-    })
-  })
-
-  autoUpdater.on('update-not-available', () => {
-    sendToAllWindows('updater:not-available')
-  })
-
-  autoUpdater.on('download-progress', (progress) => {
-    sendToAllWindows('updater:progress', {
-      percent: progress.percent,
-      transferred: progress.transferred,
-      total: progress.total,
-    })
-  })
-
-  autoUpdater.on('update-downloaded', () => {
-    sendToAllWindows('updater:downloaded')
-  })
-
-  autoUpdater.on('error', (error) => {
-    console.error('Auto updater error:', error)
-    sendToAllWindows('updater:error', {
-      message: error.message,
-    })
+    return app.getVersion()
   })
 }
 
