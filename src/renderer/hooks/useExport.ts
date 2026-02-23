@@ -4,7 +4,7 @@ import { useSettingsStore } from '@/store/settings'
 import { sendNonStreamMessage } from '@/api/client'
 import type { Message } from '@/types'
 
-const DESIGN_DOC_PROMPT = `请将以下设定档案转换为适合放入游戏开发项目目录、供 Claude Code 或 Cursor 读取的结构化策划文档。
+const DESIGN_DOC_PROMPT = `请将以下文学策划文档转换为适合放入游戏开发项目目录、供 Claude Code 或 Cursor 读取的结构化技术策划文档。
 使用 Markdown 格式，包含清晰的分类标题和数据化的属性描述。`
 
 function formatMessageForExport(message: Message): string {
@@ -199,11 +199,79 @@ export function useExport() {
     }
   }, [currentConversation])
 
+  // 列出绑定目录中的 .md 文件
+  const listMdFiles = useCallback(async (): Promise<string[]> => {
+    if (!currentConversation?.projectPath) return []
+    try {
+      const result = await window.api.file.listDirectory(currentConversation.projectPath)
+      if (!result.success || !result.files) return []
+      return (result.files as { name: string; isFile: boolean }[])
+        .filter((f) => f.isFile && f.name.endsWith('.md'))
+        .map((f) => f.name)
+    } catch {
+      return []
+    }
+  }, [currentConversation?.projectPath])
+
+  // 将选定的文学策划文档转换为技术策划文档
+  const exportSelectedMdAsDesign = useCallback(async (
+    sourceFile: string,
+    outputFileName: string
+  ): Promise<{ success: boolean; path?: string; error?: string }> => {
+    if (!currentConversation?.projectPath) {
+      return { success: false, error: '没有绑定项目目录' }
+    }
+
+    setIsExporting(true)
+
+    try {
+      // 读取源文件
+      const sourcePath = `${currentConversation.projectPath}/${sourceFile}`
+      const readResult = await window.api.file.read(sourcePath)
+      if (!readResult.success || !readResult.content) {
+        setIsExporting(false)
+        return { success: false, error: '读取源文件失败' }
+      }
+
+      // 发送给 AI 转换
+      const designDoc = await sendNonStreamMessage(
+        settings,
+        [
+          {
+            id: 'temp',
+            role: 'user',
+            content: [{ type: 'text', text: readResult.content }],
+            pinned: false,
+            createdAt: Date.now(),
+          },
+        ],
+        DESIGN_DOC_PROMPT
+      )
+
+      // 保存为新文件
+      const outputPath = `${currentConversation.projectPath}/${outputFileName}`
+      const writeResult = await window.api.file.write(outputPath, designDoc)
+
+      setIsExporting(false)
+
+      if (writeResult.success) {
+        return { success: true, path: outputPath }
+      } else {
+        return { success: false, error: writeResult.error }
+      }
+    } catch (error) {
+      setIsExporting(false)
+      return { success: false, error: (error as Error).message }
+    }
+  }, [currentConversation, settings])
+
   return {
     isExporting,
     exportAsMarkdown,
     exportAsText,
     exportDesignDoc,
     saveToFile,
+    listMdFiles,
+    exportSelectedMdAsDesign,
   }
 }

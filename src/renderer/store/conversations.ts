@@ -87,6 +87,18 @@ export const useConversationsStore = create<ConversationsStore>()((set, get) => 
       tokenCount: 0,
     })
 
+    // 如果绑定了目录，自动创建 archive.md（若不存在）
+    if (projectPath) {
+      try {
+        const exists = await window.api.archive.exists(projectPath)
+        if (!exists) {
+          await window.api.archive.create(projectPath, '')
+        }
+      } catch (error) {
+        console.warn('Failed to auto-create archive.md:', error)
+      }
+    }
+
     await get().loadConversations()
     await get().selectConversation(id)
     return id

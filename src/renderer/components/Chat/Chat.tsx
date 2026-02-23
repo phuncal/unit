@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Send, Image as ImageIcon, Pin, Trash2, RefreshCw, Settings, FileText, Download, ChevronDown, GitBranch } from 'lucide-react'
+import { Send, Image as ImageIcon, Pin, Trash2, RefreshCw, Settings, FileText, Download, ChevronDown, GitBranch, Paperclip } from 'lucide-react'
 import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
 import { useChat } from '@/hooks/useChat'
@@ -156,6 +156,7 @@ export function Chat() {
   const createBranch = useConversationsStore((state) => state.createBranch)
   const selectConversation = useConversationsStore((state) => state.selectConversation)
   const setSettingsPanelOpen = useSettingsStore((state) => state.setSettingsPanelOpen)
+  const [archiveLoaded, setArchiveLoaded] = useState(false)
 
   // 直接从 store 获取 streaming 状态，不通过 useChat
   const isStreaming = useConversationsStore((state) => state.isStreaming)
@@ -168,14 +169,62 @@ export function Chat() {
     contextStats,
     costEstimate,
   } = useChat()
-  const { exportAsMarkdown, exportAsText, exportDesignDoc, isExporting } = useExport()
+  const { exportAsMarkdown, exportAsText, isExporting, listMdFiles, exportSelectedMdAsDesign, saveToFile } = useExport()
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<ContentBlock[]>([])
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null)
 
+  // 长内容导出提示
+  const [longContentPrompt, setLongContentPrompt] = useState<{
+    content: string
+    messageId: string
+  } | null>(null)
+  const [exportFileName, setExportFileName] = useState('')
+
+  // 策划文档转换
+  const [showDesignDocPanel, setShowDesignDocPanel] = useState(false)
+  const [mdFiles, setMdFiles] = useState<string[]>([])
+  const [selectedMdFile, setSelectedMdFile] = useState('')
+  const [designOutputName, setDesignOutputName] = useState('')
+
+  // 上一次 isStreaming 的值，用于检测流式完成
+  const prevStreamingRef = useRef(false)
+
   const parentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // 检测流式响应完成，若内容超过500字则提示导出
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current
+    prevStreamingRef.current = isStreaming
+
+    if (wasStreaming && !isStreaming && currentConversation) {
+      const msgs = currentConversation.messages
+      if (msgs.length > 0) {
+        const lastMsg = msgs[msgs.length - 1]
+        if (lastMsg.role === 'assistant') {
+          const text = lastMsg.content.filter((b) => b.type === 'text').map((b) => b.text || '').join('')
+          if (text.length > 500 && currentConversation.projectPath) {
+            setLongContentPrompt({ content: text, messageId: lastMsg.id })
+            setExportFileName(`ai-response-${Date.now()}.md`)
+          }
+        }
+      }
+    }
+  }, [isStreaming, currentConversation])
+
+  // 检测当前对话是否有档案，用于显示系统提示
+  useEffect(() => {
+    setArchiveLoaded(false)
+    if (!currentConversation?.projectPath) return
+
+    window.api.archive.read(currentConversation.projectPath).then((result) => {
+      if (result.success && result.content && result.content.trim()) {
+        setArchiveLoaded(true)
+      }
+    }).catch(() => {})
+  }, [currentConversation?.id, currentConversation?.projectPath])
 
   // 滚动到高亮消息
   const handleHighlight = useCallback((messageId: string) => {
@@ -272,6 +321,26 @@ export function Chat() {
 
   const handleRemovePendingImage = (index: number) => {
     setPendingImages((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleTextFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+
+    for (const file of Array.from(files)) {
+      if (!file.name.endsWith('.txt') && !file.name.endsWith('.md')) continue
+      try {
+        const text = await file.text()
+        setInput((prev) => {
+          const separator = prev.trim() ? '\n\n' : ''
+          return prev + separator + `【文件：${file.name}】\n${text}`
+        })
+      } catch (error) {
+        console.error('Failed to read file:', error)
+      }
+    }
+
+    e.target.value = ''
   }
 
   // 拖放文件处理
@@ -468,19 +537,17 @@ export function Chat() {
                     {currentConversation.projectPath && (
                       <button
                         onClick={async () => {
-                          const result = await exportDesignDoc()
                           setShowExportMenu(false)
-                          if (result.success) {
-                            alert('策划文档已导出')
-                          } else {
-                            alert('导出失败: ' + result.error)
-                          }
+                          const files = await listMdFiles()
+                          setMdFiles(files)
+                          setSelectedMdFile(files[0] || '')
+                          setDesignOutputName('design-' + Date.now() + '.md')
+                          setShowDesignDocPanel(true)
                         }}
-                        disabled={isExporting}
-                        className="w-full py-2 text-left text-sm hover:bg-bg-secondary/80 rounded-lg transition-all duration-120 text-text-secondary hover:text-text-primary disabled:opacity-50"
+                        className="w-full py-2 text-left text-sm hover:bg-bg-secondary/80 rounded-lg transition-all duration-120 text-text-secondary hover:text-text-primary"
                         style={{ paddingLeft: '14px', paddingRight: '12px' }}
                       >
-                        {isExporting ? '导出中...' : '导出策划文档'}
+                        策划文档转换
                       </button>
                     )}
                   </div>
@@ -505,9 +572,19 @@ export function Chat() {
       <div ref={parentRef} className="flex-1 overflow-y-auto">
         {messages.length === 0 && !isStreaming ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-text-secondary text-sm">开始对话吧</p>
+            {archiveLoaded ? (
+              <p className="text-accent text-sm">已读取项目档案，了解之前的讨论内容，可以开始新的对话。</p>
+            ) : (
+              <p className="text-text-secondary text-sm">开始对话吧</p>
+            )}
           </div>
         ) : (
+          <>
+          {archiveLoaded && (
+            <div className="px-6 pt-4 pb-2">
+              <p className="text-[12px] text-accent/80 text-center">已读取项目档案，了解之前的讨论内容，可以开始新的对话。</p>
+            </div>
+          )}
           <div
             style={{
               height: `${virtualizer.getTotalSize()}px`,
@@ -556,6 +633,7 @@ export function Chat() {
               )
             })}
           </div>
+          </>
         )}
       </div>
 
@@ -600,18 +678,29 @@ export function Chat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault()
                   handleSend()
                 }
               }}
-              placeholder={canSend ? "输入消息..." : "请先配置 API"}
+              placeholder={canSend ? "输入消息，⌘↩ 发送..." : "请先配置 API"}
               rows={1}
               disabled={!canSend || isStreaming}
               className="flex-1 resize-none min-h-[24px] max-h-[200px] text-[14px] leading-[1.6] text-text-primary placeholder:text-text-secondary/60 disabled:opacity-50"
             />
             <div className="flex items-center gap-2">
-              <label className="p-2 rounded-lg hover:bg-bg-tertiary transition-all duration-120 text-text-secondary/60 hover:text-text-secondary cursor-pointer">
+              <label className="p-2 rounded-lg hover:bg-bg-tertiary transition-all duration-120 text-text-secondary/60 hover:text-text-secondary cursor-pointer" title="上传文本文件 (.txt / .md)">
+                <Paperclip className="w-[18px] h-[18px]" />
+                <input
+                  type="file"
+                  accept=".txt,.md"
+                  multiple
+                  onChange={handleTextFileUpload}
+                  className="hidden"
+                  disabled={!canSend || isStreaming}
+                />
+              </label>
+              <label className="p-2 rounded-lg hover:bg-bg-tertiary transition-all duration-120 text-text-secondary/60 hover:text-text-secondary cursor-pointer" title="上传图片">
                 <ImageIcon className="w-[18px] h-[18px]" />
                 <input
                   type="file"
@@ -634,6 +723,109 @@ export function Chat() {
           </div>
         </div>
       </div>
+
+      {/* 长内容导出提示 */}
+      {longContentPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="w-80 bg-bg-primary rounded-xl shadow-2xl p-5 border border-border">
+            <h3 className="text-sm font-medium text-text-primary mb-2">内容较长，是否导出为 md 文件？</h3>
+            <p className="text-xs text-text-secondary mb-4">内容共 {longContentPrompt.content.length} 字，可导出到绑定目录</p>
+            <input
+              type="text"
+              value={exportFileName}
+              onChange={(e) => setExportFileName(e.target.value)}
+              placeholder="文件名（如 output.md）"
+              className="w-full px-3 py-1.5 text-sm bg-bg-secondary border border-border rounded-lg mb-3 focus:outline-none focus:border-accent"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  if (!exportFileName.trim()) return
+                  const name = exportFileName.trim().endsWith('.md') ? exportFileName.trim() : exportFileName.trim() + '.md'
+                  const result = await saveToFile(longContentPrompt.content, name)
+                  if (result.success) {
+                    alert(`已导出到 ${result.path}`)
+                  } else {
+                    alert('导出失败：' + result.error)
+                  }
+                  setLongContentPrompt(null)
+                }}
+                className="flex-1 px-3 py-2 text-sm rounded-xl bg-accent/10 hover:bg-accent/20 transition-all duration-120 text-accent font-medium"
+              >
+                导出
+              </button>
+              <button
+                onClick={() => setLongContentPrompt(null)}
+                className="flex-1 px-3 py-2 text-sm rounded-xl border border-border/60 hover:bg-bg-secondary transition-all duration-120 text-text-secondary"
+              >
+                在对话中显示
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 策划文档转换面板 */}
+      {showDesignDocPanel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="w-96 bg-bg-primary rounded-xl shadow-2xl p-5 border border-border">
+            <h3 className="text-sm font-medium text-text-primary mb-4">策划文档转换</h3>
+            {mdFiles.length === 0 ? (
+              <p className="text-sm text-text-secondary mb-4">绑定目录中未找到 .md 文件</p>
+            ) : (
+              <>
+                <div className="mb-3">
+                  <label className="text-xs text-text-secondary mb-1 block">选择输入文件</label>
+                  <select
+                    value={selectedMdFile}
+                    onChange={(e) => setSelectedMdFile(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm bg-bg-secondary border border-border rounded-lg focus:outline-none focus:border-accent"
+                  >
+                    {mdFiles.map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mb-4">
+                  <label className="text-xs text-text-secondary mb-1 block">输出文件名</label>
+                  <input
+                    type="text"
+                    value={designOutputName}
+                    onChange={(e) => setDesignOutputName(e.target.value)}
+                    placeholder="如 design.md"
+                    className="w-full px-3 py-1.5 text-sm bg-bg-secondary border border-border rounded-lg focus:outline-none focus:border-accent"
+                  />
+                </div>
+              </>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  if (!selectedMdFile || !designOutputName.trim()) return
+                  const name = designOutputName.trim().endsWith('.md') ? designOutputName.trim() : designOutputName.trim() + '.md'
+                  const result = await exportSelectedMdAsDesign(selectedMdFile, name)
+                  if (result.success) {
+                    alert(`已导出到 ${result.path}`)
+                    setShowDesignDocPanel(false)
+                  } else {
+                    alert('转换失败：' + result.error)
+                  }
+                }}
+                disabled={isExporting || mdFiles.length === 0}
+                className="flex-1 px-3 py-2 text-sm rounded-xl bg-accent/10 hover:bg-accent/20 transition-all duration-120 text-accent font-medium disabled:opacity-50"
+              >
+                {isExporting ? '转换中...' : '开始转换'}
+              </button>
+              <button
+                onClick={() => setShowDesignDocPanel(false)}
+                className="flex-1 px-3 py-2 text-sm rounded-xl border border-border/60 hover:bg-bg-secondary transition-all duration-120 text-text-secondary"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
