@@ -15,6 +15,7 @@ import { useArchiveMention, ArchiveMentionPicker } from './useArchiveMention'
 import { T } from '@/lib/tokens'
 import { useTranslation } from '@/lib/i18n'
 import type { Message, ContentBlock } from '@/types'
+import { ManualPanel } from '@/components/ManualPanel'
 
 // 高亮搜索关键词
 function highlightText(text: string | undefined, keyword: string | undefined): React.ReactNode {
@@ -184,6 +185,9 @@ export function Chat() {
   const { t } = useTranslation()
 
   const [archiveLoaded, setArchiveLoaded] = useState(false)
+
+  // 说明书面板视图状态
+  const [view, setView] = useState<string | null>(null)
 
   // 直接从 store 获取 streaming 状态，不通过 useChat
   const isStreaming = useConversationsStore((state) => state.isStreaming)
@@ -434,7 +438,7 @@ export function Chat() {
   }, [])
 
   // ============================================================
-  // 欢迎界面 — 100% 照搬 UnitRedesign.jsx !activeSessionId 分支
+  // 欢迎界面 — 打字机 Logo + 说明书入口
   // ============================================================
   if (!currentConversation) {
     return (
@@ -448,53 +452,64 @@ export function Chat() {
           style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
         />
 
-        {/* 封面内容 — 100% 照搬原型 flex flex-col items-center 垂直轴结构 */}
-        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center relative">
-          <div className="flex flex-col items-center">
-            {/* 同心圆标志 */}
-            <div className="mb-10 relative">
-              <div
-                className="w-32 h-32 border rounded-full flex items-center justify-center"
-                style={{ borderColor: T.border }}
-              >
-                <div
-                  className="w-16 h-16 border rounded-full flex items-center justify-center"
-                  style={{
-                    borderColor: T.orange,
-                    boxShadow: '0 0 15px rgba(212,119,0,0.15)',
-                  }}
-                >
-                  <div
-                    className="w-1 h-1 rounded-full"
-                    style={{ backgroundColor: T.orange }}
-                  />
-                </div>
-              </div>
+        {/* 封面内容 — 打字机 Logo 物理一体化 */}
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center animate-in fade-in duration-1000 relative">
+          <div className="absolute top-0 left-0 w-full h-12" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
+
+          <div className="flex flex-col items-center w-full max-w-2xl -mt-16">
+
+            {/* 打字机 Logo 容器：自适应高度，正常下边距 */}
+            <div className="mb-8 relative flex flex-col items-center justify-center w-[320px] mx-auto">
+              {/* 底部棚拍阴影层修复：
+                  1. 改为 -z-10 避免层级溢出导致遮挡 Modal。
+                  2. 加深 bg-black 浓度，降低 blur 值，增强接触面的实体压迫感，解决发飘问题。*/}
+              <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-[260px] h-[24px] bg-black/30 blur-xl rounded-[100%] pointer-events-none -z-10" />
+              <div className="absolute bottom-[2px] left-1/2 -translate-x-1/2 w-[200px] h-[8px] bg-black/60 blur-md rounded-[100%] pointer-events-none -z-10" />
+
+              {/* 透明 PNG：unit_cover.png，保留阴影，禁止混合模式 */}
+              <img
+                src="unit_cover.png"
+                alt="Unit Typewriter"
+                className="w-full h-auto object-contain opacity-95 drop-shadow-xl"
+              />
             </div>
 
-            {/* pl-[0.5em] 补偿 tracking 造成的视觉不对称 */}
-            <h1
-              className="text-4xl font-bold tracking-[0.5em] mb-4 font-mono opacity-80 pl-[0.5em]"
-              style={{ color: T.textPrimary }}
-            >
-              UNIT
-            </h1>
+            {/* 描述文字 - 修复：移除了导致穿透到 Modal 弹窗上方的 relative z-20 */}
             <p
-              className="text-[10px] font-bold uppercase tracking-[0.3em] mb-12"
+              className="text-[10px] font-bold uppercase tracking-[0.45em] mb-6 opacity-60 w-full text-center pl-[0.45em]"
               style={{ color: T.textMuted }}
             >
               {t('standbyDesc')}
             </p>
-            <button
-              onClick={() => setNewConversationDialogOpen(true)}
-              className="flex items-center gap-3 px-8 py-3 rounded-sm transition-all text-[11px] font-bold uppercase tracking-[0.2em] shadow-md hover:brightness-110 active:translate-y-px"
-              style={{ backgroundColor: T.accent, color: T.mainBg }}
-            >
-              <Plus size={14} strokeWidth={3} />
-              {t('newChat')}
-            </button>
+
+            {/* 修复：移除了导致穿透到 Modal 弹窗上方的 relative z-20 */}
+            <div className="flex flex-col items-center gap-3">
+              {/* 新建对话按钮 - 保留原有 onClick */}
+              <button
+                onClick={() => setNewConversationDialogOpen(true)}
+                className="flex items-center gap-3 px-12 py-3.5 rounded-sm transition-all text-[11px] font-bold uppercase tracking-[0.2em] shadow-md hover:brightness-110 active:translate-y-px"
+                style={{ backgroundColor: T.accent, color: T.mainBg }}
+              >
+                <Plus size={14} strokeWidth={3} />
+                {t('newChat')}
+              </button>
+              {/* 说明书入口按钮 */}
+              <button
+                onClick={() => setView('manual')}
+                className="text-[10px] font-bold uppercase tracking-widest transition-colors hover:text-[#D47700]"
+                style={{ color: T.textMuted }}
+              >
+                {t('info')}
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* 说明书面板 */}
+        <ManualPanel
+          isOpen={view === 'manual'}
+          onClose={() => setView(null)}
+        />
       </main>
     )
   }

@@ -121,6 +121,21 @@ export const translations = {
     usageStats:         '费用统计',
     usageStatsTip:      '费用基于 API 返回的 token 用量计算，仅统计有价格信息的模型。',
 
+    // 说明书面板
+    manualTitle:        '使用说明书 / USER MANUAL',
+    whatIsUnit:         'UNIT 是什么',
+    whatIsUnitDesc:     '一个运行在 macOS 上的 AI 对话工具，专为深度讨论游戏、影视、文学作品设定而设计。轻量、专注、无多余功能。',
+    quickStart:         '五分钟上手',
+    qs1:                '01 配置 API：填写地址和 Key，点击获取模型。',
+    qs2:                '02 创建项目：绑定文件夹，自动生成 archive.md。',
+    qs3:                '03 开始对话：使用模板预设角色，开启讨论。',
+    coreFeatures:       '核心功能',
+    tips:               '使用建议',
+    tip1:               '建议为每个项目建立独立文件夹，保持结论连续性。',
+    tip2:               '重要文档上传后立即打锚点，防止被滑动窗口挤掉。',
+    footerSlogan:       'Unit · 专注于深度讨论，不做多余的事',
+    info:               '使用说明 / INFO',
+
     // 通用
     saveTip:            '保存',
     uploadImage:        '上传图片',
@@ -247,6 +262,21 @@ export const translations = {
     // Usage stats
     usageStats:         'ANALYTICS',
     usageStatsTip:      'Costs calculated from API token usage. Only models with pricing info are counted.',
+
+    // Manual panel
+    manualTitle:        'USER MANUAL / 使用说明书',
+    whatIsUnit:         'WHAT IS UNIT',
+    whatIsUnitDesc:     'A macOS desktop AI tool built for deep discussions on game, film, and literary worldbuilding. Lightweight, focused, and free of bloat.',
+    quickStart:         'GET STARTED IN 5 MINS',
+    qs1:                '01 Config API: Enter endpoint and Key, then fetch models.',
+    qs2:                '02 Create Project: Bind a local folder to auto-generate archive.md.',
+    qs3:                '03 Start Session: Use templates to preset AI roles and context.',
+    coreFeatures:       'CORE FEATURES',
+    tips:               'BEST PRACTICES',
+    tip1:               'Create a dedicated folder for each project to maintain continuity.',
+    tip2:               'Anchor documents immediately to prevent them from dropping out.',
+    footerSlogan:       'Unit · Built for depth. Nothing more.',
+    info:               'USER MANUAL / INFO',
 
     // General
     saveTip:            'Save',
