@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { X, Plus, Trash2, Edit2 } from 'lucide-react'
 import { useConversationsStore } from '@/store/conversations'
+import { T } from '@/lib/tokens'
+import { useTranslation } from '@/lib/i18n'
 
 interface TemplateManagerProps {
   isOpen: boolean
@@ -8,6 +10,7 @@ interface TemplateManagerProps {
 }
 
 export function TemplateManager({ isOpen, onClose }: TemplateManagerProps) {
+  const { t } = useTranslation()
   const { templates, createTemplate, deleteTemplate } = useConversationsStore()
   const [isCreating, setIsCreating] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -30,7 +33,6 @@ export function TemplateManager({ isOpen, onClose }: TemplateManagerProps) {
 
   const handleSaveEdit = async () => {
     if (!editingId || !name.trim()) return
-    // 暂时用 delete + create 来模拟 update
     await deleteTemplate(editingId)
     await createTemplate(name.trim(), systemPrompt.trim())
     setEditingId(null)
@@ -39,7 +41,7 @@ export function TemplateManager({ isOpen, onClose }: TemplateManagerProps) {
   }
 
   const handleDelete = async (id: string) => {
-    if (confirm('确定删除此模板？')) {
+    if (confirm(t('confirmDeleteTpl'))) {
       await deleteTemplate(id)
     }
   }
@@ -47,80 +49,126 @@ export function TemplateManager({ isOpen, onClose }: TemplateManagerProps) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+      style={{ backgroundColor: 'rgba(43,42,39,0.18)', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      onClick={onClose}
+    >
       <div
-        className="w-[500px] max-h-[80vh] bg-bg-primary rounded-lg shadow-xl overflow-hidden"
+        className="w-[500px] max-h-[80vh] border shadow-2xl rounded-sm overflow-hidden flex flex-col"
+        style={{ backgroundColor: T.mainBg, borderColor: T.border }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 标题栏 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-medium text-text-primary">对话模板管理</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-bg-secondary transition-colors">
-            <X className="w-4 h-4 text-text-secondary" />
+        <div
+          className="flex-shrink-0 flex items-center justify-between px-8 py-5 border-b relative"
+          style={{ borderColor: T.border }}
+        >
+          <h2
+            className="text-[13px] font-bold tracking-wide"
+            style={{ color: T.textPrimary }}
+          >
+            {t('templateManager')}
+          </h2>
+          <button
+            onClick={onClose}
+            className="absolute right-8 top-5 transition-transform hover:rotate-90"
+          >
+            <X size={17} style={{ color: T.textMuted }} />
           </button>
         </div>
 
         {/* 模板列表 */}
-        <div className="p-4 space-y-3 max-h-[50vh] overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-3">
           {templates.length === 0 && !isCreating && (
-            <p className="text-center text-text-secondary text-sm py-8">
-              暂无模板，点击下方按钮创建
-            </p>
+            <div className="flex items-center justify-center py-12">
+              <p className="text-[12px]" style={{ color: T.textMuted, opacity: 0.7 }}>
+                {t('noTemplates')}
+              </p>
+            </div>
           )}
 
           {templates.map((template) => (
-            <div key={template.id} className="border border-border rounded-lg p-3">
+            <div
+              key={template.id}
+              className="border rounded-sm p-5 group transition-all"
+              style={{
+                borderColor: T.border,
+                backgroundColor: 'rgba(43,42,39,0.02)',
+              }}
+            >
               {editingId === template.id ? (
-                <div className="space-y-2">
+                <div className="space-y-4">
                   <input
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="模板名称"
-                    className="w-full px-2 py-1 bg-bg-secondary rounded text-sm"
+                    className="w-full border-b py-1 text-sm outline-none"
+                    style={{ borderColor: T.border, color: T.textPrimary }}
+                    autoFocus
                   />
                   <textarea
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
                     placeholder="System Prompt"
                     rows={3}
-                    className="w-full px-2 py-1 bg-bg-secondary rounded text-sm resize-none"
+                    className="w-full text-sm resize-none outline-none leading-relaxed"
+                    style={{ color: T.textPrimary }}
                   />
-                  <div className="flex justify-end gap-2">
+                  <div className="flex justify-end gap-6 pt-1">
                     <button
                       onClick={() => setEditingId(null)}
-                      className="px-3 py-1 text-sm text-text-secondary hover:text-text-primary"
+                      className="text-[10px] font-bold uppercase tracking-wider transition-colors opacity-60 hover:opacity-100"
+                      style={{ color: T.textMuted }}
                     >
-                      取消
+                      {t('cancel')}
                     </button>
                     <button
                       onClick={handleSaveEdit}
-                      className="px-3 py-1.5 text-sm rounded-xl hover:bg-bg-secondary active:scale-[0.98] transition-all duration-120 text-text-secondary hover:text-text-primary"
+                      className="text-[10px] font-bold uppercase tracking-wider transition-colors"
+                      style={{ color: T.orange }}
                     >
-                      保存
+                      {t('saveTemplate')}
                     </button>
                   </div>
                 </div>
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-medium text-text-primary">{template.name}</h4>
-                    <div className="flex items-center gap-1">
+                    <span
+                      className="text-sm font-bold"
+                      style={{ color: T.textPrimary, opacity: 0.85 }}
+                    >
+                      {template.name}
+                    </span>
+                    <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => handleStartEdit(template)}
-                        className="p-1 rounded hover:bg-bg-secondary transition-colors"
+                        className="transition-colors"
+                        style={{ color: T.textMuted }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
                       >
-                        <Edit2 className="w-3 h-3 text-text-secondary" />
+                        <Edit2 size={13} />
                       </button>
                       <button
                         onClick={() => handleDelete(template.id)}
-                        className="p-1 rounded hover:bg-bg-secondary transition-colors"
+                        className="transition-colors"
+                        style={{ color: T.textMuted }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = T.warning)}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
                       >
-                        <Trash2 className="w-3 h-3 text-warning" />
+                        <Trash2 size={13} strokeWidth={2} />
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs text-text-secondary line-clamp-2">{template.systemPrompt || '无 System Prompt'}</p>
+                  <p
+                    className="text-[11px] leading-relaxed italic font-light line-clamp-2"
+                    style={{ color: T.textMuted, opacity: 0.75 }}
+                  >
+                    {template.systemPrompt || t('noSystemPrompt')}
+                  </p>
                 </>
               )}
             </div>
@@ -128,13 +176,20 @@ export function TemplateManager({ isOpen, onClose }: TemplateManagerProps) {
 
           {/* 新建模板表单 */}
           {isCreating && (
-            <div className="border border-accent rounded-lg p-3 space-y-2">
+            <div
+              className="border rounded-sm p-5 space-y-4"
+              style={{
+                borderColor: T.orange,
+                backgroundColor: 'rgba(43,42,39,0.04)',
+              }}
+            >
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="模板名称（如：设定考据者）"
-                className="w-full px-2 py-1 bg-bg-secondary rounded text-sm"
+                placeholder={t('templateNamePh')}
+                className="w-full border-b py-1 text-sm outline-none"
+                style={{ borderColor: T.border, color: T.textPrimary }}
                 autoFocus
               />
               <textarea
@@ -142,40 +197,53 @@ export function TemplateManager({ isOpen, onClose }: TemplateManagerProps) {
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 placeholder="System Prompt..."
                 rows={4}
-                className="w-full px-2 py-1 bg-bg-secondary rounded text-sm resize-none"
+                className="w-full text-sm resize-none outline-none leading-relaxed"
+                style={{ color: T.textPrimary }}
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-6 pt-1">
                 <button
-                  onClick={() => {
-                    setIsCreating(false)
-                    setName('')
-                    setSystemPrompt('')
-                  }}
-                  className="px-3 py-1 text-sm text-text-secondary hover:text-text-primary"
+                  onClick={() => { setIsCreating(false); setName(''); setSystemPrompt('') }}
+                  className="text-[10px] font-bold uppercase tracking-wider transition-colors opacity-60 hover:opacity-100"
+                  style={{ color: T.textMuted }}
                 >
-                  取消
+                  {t('cancel')}
                 </button>
                 <button
                   onClick={handleCreate}
                   disabled={!name.trim()}
-                  className="px-3 py-1.5 text-sm rounded-xl hover:bg-bg-secondary active:scale-[0.98] transition-all duration-120 disabled:opacity-50 disabled:active:scale-100 text-text-secondary hover:text-text-primary disabled:hover:text-text-secondary"
+                  className="text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
+                  style={{ color: T.orange }}
                 >
-                  创建
+                  {t('saveTemplate')}
                 </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* 底部按钮 */}
-        <div className="border-t border-border px-4 py-3">
+        {/* 底部：新建按钮 */}
+        <div
+          className="flex-shrink-0 border-t px-6 py-4"
+          style={{ borderColor: T.border }}
+        >
           <button
             onClick={() => setIsCreating(true)}
             disabled={isCreating}
-            className="flex items-center gap-2 px-3 py-2 text-sm text-accent hover:bg-bg-secondary rounded transition-colors disabled:opacity-50"
+            className="w-full py-3 border border-dashed flex items-center justify-center gap-2 rounded-sm transition-colors disabled:opacity-50 text-[11px] font-bold uppercase tracking-wider"
+            style={{ borderColor: T.border, color: T.textMuted }}
+            onMouseEnter={(e) => {
+              if (!isCreating) {
+                e.currentTarget.style.borderColor = T.orange
+                e.currentTarget.style.color = T.orange
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = T.border
+              e.currentTarget.style.color = T.textMuted
+            }}
           >
-            <Plus className="w-4 h-4" />
-            新建模板
+            <Plus size={13} />
+            {t('newTemplate')}
           </button>
         </div>
       </div>

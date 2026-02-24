@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react'
 import { X, Check, Pin } from 'lucide-react'
 import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
+import { T } from '@/lib/tokens'
+import { useTranslation } from '@/lib/i18n'
 
 interface ContextSelectorProps {
   isOpen: boolean
@@ -10,35 +12,25 @@ interface ContextSelectorProps {
 }
 
 export function ContextSelector({ isOpen, onClose, onConfirm }: ContextSelectorProps) {
+  const { t, lang } = useTranslation()
   const { currentConversation } = useConversationsStore()
   const { settings } = useSettingsStore()
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  // 初始化：默认选择滑动窗口内的消息 + 锚点消息
   const defaultSelected = useMemo(() => {
     if (!currentConversation) return new Set<string>()
-
     const messages = currentConversation.messages
     const windowSize = settings.slidingWindowSize
     const recentStart = Math.max(0, messages.length - windowSize)
-
     const selected = new Set<string>()
-
     messages.forEach((msg, index) => {
-      // 锚点消息或最近 N 条
-      if (msg.pinned || index >= recentStart) {
-        selected.add(msg.id)
-      }
+      if (msg.pinned || index >= recentStart) selected.add(msg.id)
     })
-
     return selected
   }, [currentConversation, settings.slidingWindowSize])
 
-  // 打开时重置选择
   useMemo(() => {
-    if (isOpen) {
-      setSelectedIds(new Set(defaultSelected))
-    }
+    if (isOpen) setSelectedIds(new Set(defaultSelected))
   }, [isOpen, defaultSelected])
 
   if (!isOpen || !currentConversation) return null
@@ -48,26 +40,15 @@ export function ContextSelector({ isOpen, onClose, onConfirm }: ContextSelectorP
   const toggleMessage = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
 
-  const selectAll = () => {
-    setSelectedIds(new Set(messages.map((m) => m.id)))
-  }
-
-  const selectNone = () => {
-    setSelectedIds(new Set())
-  }
-
-  const selectDefault = () => {
-    setSelectedIds(new Set(defaultSelected))
-  }
+  const selectAll = () => setSelectedIds(new Set(messages.map((m) => m.id)))
+  const selectNone = () => setSelectedIds(new Set())
+  const selectDefault = () => setSelectedIds(new Set(defaultSelected))
 
   const handleConfirm = () => {
     onConfirm(Array.from(selectedIds))
@@ -75,48 +56,70 @@ export function ContextSelector({ isOpen, onClose, onConfirm }: ContextSelectorP
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+      style={{ backgroundColor: 'rgba(43,42,39,0.18)', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      onClick={onClose}
+    >
       <div
-        className="w-[600px] max-h-[80vh] bg-bg-primary rounded-lg shadow-xl overflow-hidden"
+        className="w-[600px] max-h-[80vh] border shadow-2xl rounded-sm overflow-hidden flex flex-col"
+        style={{ backgroundColor: T.mainBg, borderColor: T.border }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 标题栏 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div
+          className="flex-shrink-0 flex items-center justify-between px-8 py-5 border-b relative"
+          style={{ borderColor: T.border }}
+        >
           <div>
-            <h3 className="text-sm font-medium text-text-primary">选择携带的上下文</h3>
-            <p className="text-xs text-text-secondary mt-0.5">
-              已选择 {selectedIds.size} / {messages.length} 条消息
+            <h2
+              className="text-[13px] font-bold tracking-wide"
+              style={{ color: T.textPrimary }}
+            >
+              {t('contextTitle')}
+            </h2>
+            <p
+              className="text-[11px] mt-0.5"
+              style={{ color: T.textMuted }}
+            >
+              {lang === 'zh'
+                ? `已选择 ${selectedIds.size} / ${messages.length} 条消息`
+                : `${selectedIds.size} / ${messages.length} messages selected`}
             </p>
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-bg-secondary">
-            <X className="w-4 h-4 text-text-secondary" />
+          <button
+            onClick={onClose}
+            className="absolute right-8 top-5 transition-transform hover:rotate-90"
+          >
+            <X size={17} style={{ color: T.textMuted }} />
           </button>
         </div>
 
-        {/* 操作按钮 */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-secondary">
-          <button
-            onClick={selectAll}
-            className="px-3 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
-          >
-            全选
-          </button>
-          <button
-            onClick={selectNone}
-            className="px-3 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
-          >
-            全不选
-          </button>
-          <button
-            onClick={selectDefault}
-            className="px-3 py-1 text-xs text-accent hover:text-accent transition-colors"
-          >
-            恢复默认
-          </button>
+        {/* 操作按钮行 */}
+        <div
+          className="flex-shrink-0 flex items-center gap-5 px-8 py-3 border-b"
+          style={{ borderColor: T.border }}
+        >
+          {[
+            { label: t('selectAll'), action: selectAll },
+            { label: t('selectNone'), action: selectNone },
+            { label: t('restoreDefault'), action: selectDefault },
+          ].map(({ label, action }) => (
+            <button
+              key={label}
+              onClick={action}
+              className="text-[12px] transition-colors"
+              style={{ color: T.textMuted }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = T.textPrimary)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* 消息列表 */}
-        <div className="max-h-[400px] overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           {messages.map((msg, index) => {
             const isSelected = selectedIds.has(msg.id)
             const isPinned = msg.pinned
@@ -130,51 +133,80 @@ export function ContextSelector({ isOpen, onClose, onConfirm }: ContextSelectorP
               <div
                 key={msg.id}
                 onClick={() => toggleMessage(msg.id)}
-                className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors ${
-                  isSelected ? 'bg-accent/5' : 'hover:bg-bg-secondary'
-                }`}
+                className="flex gap-4 px-8 py-3 cursor-pointer transition-colors border-b last:border-b-0"
+                style={{
+                  borderColor: T.border,
+                  backgroundColor: isSelected ? 'rgba(71,92,77,0.04)' : 'transparent',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) e.currentTarget.style.backgroundColor = 'rgba(43,42,39,0.03)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = isSelected ? 'rgba(71,92,77,0.04)' : 'transparent'
+                }}
               >
+                {/* 复选框 */}
                 <div
-                  className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                    isSelected
-                      ? 'bg-accent border-accent text-white'
-                      : 'border-border'
-                  }`}
+                  className="mt-0.5 w-4 h-4 border flex items-center justify-center flex-shrink-0 rounded-sm"
+                  style={{
+                    backgroundColor: isSelected ? T.accent : 'transparent',
+                    borderColor: isSelected ? T.accent : T.border,
+                  }}
                 >
-                  {isSelected && <Check className="w-3 h-3" />}
+                  {isSelected && <Check size={10} style={{ color: T.mainBg }} />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-medium text-text-secondary">
-                      #{index + 1} {msg.role === 'user' ? '用户' : 'AI'}
+                    <span
+                      className="text-[11px] font-medium"
+                      style={{ color: T.textMuted }}
+                    >
+                      #{index + 1} {msg.role === 'user' ? t('userLabel') : t('aiLabel')}
                     </span>
                     {isPinned && (
-                      <span className="flex items-center gap-0.5 text-xs text-accent">
-                        <Pin className="w-3 h-3" />
+                      <span
+                        className="flex items-center gap-0.5 text-[10px]"
+                        style={{ color: T.orange }}
+                      >
+                        <Pin size={10} />
                         锚点
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-text-primary line-clamp-2">{content || '[图片]'}</p>
+                  <p
+                    className="text-sm line-clamp-2 leading-relaxed"
+                    style={{ color: T.textPrimary }}
+                  >
+                    {content || t('imagePlaceholder')}
+                  </p>
                 </div>
               </div>
             )
           })}
         </div>
 
-        {/* 底部按钮 */}
-        <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-border">
+        {/* 底部纯文本按钮 */}
+        <div
+          className="flex-shrink-0 flex items-center justify-end gap-8 px-8 py-5 border-t"
+          style={{ borderColor: T.border }}
+        >
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary"
+            className="text-[13px] transition-colors"
+            style={{ color: T.textMuted }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = T.textPrimary)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
           >
-            取消
+            {t('cancel')}
           </button>
           <button
             onClick={handleConfirm}
-            className="px-4 py-2 text-sm rounded-xl hover:bg-bg-secondary active:scale-[0.98] transition-all duration-120 text-text-secondary hover:text-text-primary"
+            className="text-[13px] transition-colors"
+            style={{ color: T.textPrimary }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = T.accent)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = T.textPrimary)}
           >
-            确认并发送
+            {t('confirmSend')}
           </button>
         </div>
       </div>

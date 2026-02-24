@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Download, X } from 'lucide-react'
+import { T } from '@/lib/tokens'
+import { useTranslation } from '@/lib/i18n'
 
 interface UpdateInfo {
   version: string
@@ -9,6 +11,7 @@ interface UpdateInfo {
 }
 
 export function UpdateBanner() {
+  const { t } = useTranslation()
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [dismissed, setDismissed] = useState(false)
 
@@ -17,48 +20,52 @@ export function UpdateBanner() {
       setUpdateInfo(info)
       setDismissed(false)
     })
-
-    // 静默忽略更新相关错误（404 = 尚无 Release，正常情况）
     const unsubscribeError = window.api.updater.onError((error) => {
       console.log('[UpdateBanner] Update check error (silently ignored):', error)
     })
-
-    return () => {
-      unsubscribe()
-      unsubscribeError()
-    }
+    return () => { unsubscribe(); unsubscribeError() }
   }, [])
 
   const handleDownload = async () => {
-    // 在浏览器中打开 DMG 下载链接，用户手动安装
     await window.api.updater.download(updateInfo?.downloadUrl)
   }
 
   if (!updateInfo || dismissed) return null
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 bg-accent text-white shadow-lg">
+    <div
+      className="fixed top-0 left-0 right-0 z-50 shadow-md"
+      style={{ backgroundColor: T.accent }}
+    >
       <div className="flex items-center justify-between px-6 py-3 max-w-7xl mx-auto">
         <div className="flex items-center gap-4 flex-1">
-          <Download className="w-5 h-5 flex-shrink-0" />
+          <Download size={16} style={{ color: T.mainBg, flexShrink: 0 }} />
           <div className="flex items-center gap-3 flex-1">
-            <span className="text-sm font-medium">
-              发现新版本 v{updateInfo.version}
+            <span
+              className="text-[12px] font-bold uppercase tracking-widest"
+              style={{ color: T.mainBg }}
+            >
+              {t('newVersion')} v{updateInfo.version}
             </span>
             <button
               onClick={handleDownload}
-              className="px-3 py-1 bg-white text-accent rounded-lg text-sm font-medium hover:bg-white/90 transition-colors"
+              className="px-3 py-1 text-[11px] font-bold uppercase tracking-wider transition-all rounded-sm active:translate-y-px"
+              style={{
+                backgroundColor: T.mainBg,
+                color: T.accent,
+              }}
             >
-              下载 DMG 安装
+              {t('downloadDMG')}
             </button>
           </div>
         </div>
         <button
           onClick={() => setDismissed(true)}
-          className="p-1 hover:bg-white/10 rounded transition-colors ml-4"
-          title="暂时关闭"
+          className="p-1 transition-opacity opacity-70 hover:opacity-100 ml-4"
+          style={{ color: T.mainBg }}
+          title={t('dismissUpdate')}
         >
-          <X className="w-4 h-4" />
+          <X size={15} />
         </button>
       </div>
     </div>

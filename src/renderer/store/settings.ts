@@ -4,11 +4,17 @@ import { Settings, DEFAULT_SETTINGS, ModelsCache } from '@/types'
 
 interface SettingsStore {
   settings: Settings
+  lang: 'zh' | 'en'
   isSettingsPanelOpen: boolean
+  isArchivePanelOpen: boolean
+  isNewConversationDialogOpen: boolean
   modelsCache: ModelsCache | null
   isFetchingModels: boolean
   setSettings: (settings: Partial<Settings>) => Promise<void>
+  setLang: (lang: 'zh' | 'en') => void
   setSettingsPanelOpen: (open: boolean) => void
+  setArchivePanelOpen: (open: boolean) => void
+  setNewConversationDialogOpen: (open: boolean) => void
   loadSettings: () => Promise<void>
   setModelsCache: (cache: ModelsCache | null) => void
   setIsFetchingModels: (fetching: boolean) => void
@@ -92,7 +98,10 @@ export const useSettingsStore = create<SettingsStore>()(
   persist(
     (set, get) => ({
       settings: DEFAULT_SETTINGS,
+      lang: 'zh' as 'zh' | 'en',
       isSettingsPanelOpen: false,
+      isArchivePanelOpen: false,
+      isNewConversationDialogOpen: false,
       modelsCache: null,
       isFetchingModels: false,
 
@@ -108,8 +117,20 @@ export const useSettingsStore = create<SettingsStore>()(
         })
       },
 
+      setLang: (lang) => {
+        set({ lang })
+      },
+
       setSettingsPanelOpen: (open) => {
         set({ isSettingsPanelOpen: open })
+      },
+
+      setArchivePanelOpen: (open) => {
+        set({ isArchivePanelOpen: open })
+      },
+
+      setNewConversationDialogOpen: (open) => {
+        set({ isNewConversationDialogOpen: open })
       },
 
       loadSettings: async () => {

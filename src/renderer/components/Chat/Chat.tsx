@@ -1,6 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Send, Image as ImageIcon, Pin, Trash2, RefreshCw, Settings, FileText, Download, ChevronDown, GitBranch, Paperclip, ListFilter } from 'lucide-react'
+import {
+  Send, Upload, Download, ChevronDown,
+  Trash2, RefreshCw, Plus, GitBranch, ListFilter,
+  Anchor,
+} from 'lucide-react'
 import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
 import { useChat } from '@/hooks/useChat'
@@ -8,6 +12,8 @@ import { useExport } from '@/hooks/useExport'
 import { ChatSearch } from './ChatSearch'
 import { ContextSelector } from './ContextSelector'
 import { useArchiveMention, ArchiveMentionPicker } from './useArchiveMention'
+import { T } from '@/lib/tokens'
+import { useTranslation } from '@/lib/i18n'
 import type { Message, ContentBlock } from '@/types'
 
 // 高亮搜索关键词
@@ -25,7 +31,7 @@ function highlightText(text: string | undefined, keyword: string | undefined): R
       parts.push(text.slice(lastIndex, index))
     }
     parts.push(
-      <mark key={index} className="bg-warning/30 text-inherit rounded px-0.5">
+      <mark key={index}>
         {text.slice(index, index + keyword.length)}
       </mark>
     )
@@ -40,12 +46,15 @@ function highlightText(text: string | undefined, keyword: string | undefined): R
   return parts.length > 0 ? parts : text
 }
 
+// ============================================================
+// MessageItem — 100% 照搬 UnitRedesign.jsx 消息结构
+// ============================================================
 function MessageItem({
   message,
   isStreaming,
   streamingContent,
   highlightKeyword,
-  isHighlighted,
+  isHighlighted: _isHighlighted,
   onPin,
   onDelete,
   onBranch,
@@ -60,88 +69,102 @@ function MessageItem({
   onBranch?: () => void
 }) {
   const isUser = message.role === 'user'
-  const content = isStreaming ? streamingContent : message.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text || '')
-    .join('')
+  const content = isStreaming
+    ? streamingContent
+    : message.content.filter((b) => b.type === 'text').map((b) => b.text || '').join('')
 
   return (
     <div
       id={`message-${message.id}`}
-      className={`px-6 py-3 group transition-colors duration-120 ${isHighlighted ? 'bg-accent/5' : ''}`}
+      className={`flex ${isUser ? 'justify-end' : 'justify-start'} group`}
+      style={{ padding: '0', transition: 'background 120ms' }}
     >
-      <div className={`${isUser ? 'ml-auto max-w-[65%]' : 'mr-auto max-w-[80%]'}`}>
+      <div className={`max-w-2xl ${isUser ? 'text-right' : 'text-left'}`}>
+        {/* 角色标签 */}
         <div
-          className={`px-5 py-4 transition-all duration-120 rounded-2xl ${
-            isUser
-              ? 'bg-bg-tertiary text-text-primary rounded-tr-sm'
-              : 'bg-bg-secondary text-text-primary rounded-tl-sm'
-          }`}
+          className="text-[9px] font-bold uppercase tracking-widest mb-1.5"
+          style={{ color: T.textMuted, opacity: 0.7 }}
         >
-          <div className="whitespace-pre-wrap break-words text-[14px] leading-[1.7]">
-            {highlightKeyword ? highlightText(content, highlightKeyword) : content}
-          </div>
-          {/* 图片显示 */}
-          {!isStreaming && message.content.some((b) => b.type === 'image') && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {message.content
-                .filter((b) => b.type === 'image')
-                .map((block, idx) => (
-                  <img
-                    key={idx}
-                    src={`data:${block.image!.mimeType};base64,${block.image!.data}`}
-                    alt=""
-                    className="max-w-[200px] max-h-[200px] rounded"
-                  />
-                ))}
-            </div>
-          )}
+          {isUser ? 'OPERATOR' : 'UNIT'}
+          {message.pinned && <span style={{ color: T.orange, marginLeft: 6 }}>◆</span>}
         </div>
-        {/* 元信息和操作按钮 */}
-        <div className={`flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-120 ${isUser ? 'justify-end' : ''}`}>
-          {/* 生成耗时 */}
+
+        {/* 正文 */}
+        <div
+          className="text-sm leading-relaxed mb-3 whitespace-pre-wrap break-words"
+          style={{ color: T.textPrimary }}
+        >
+          {highlightKeyword ? highlightText(content, highlightKeyword) : content}
+        </div>
+
+        {/* 图片 */}
+        {!isStreaming && message.content.some((b) => b.type === 'image') && (
+          <div className={`flex flex-wrap gap-2 mb-3 ${isUser ? 'justify-end' : ''}`}>
+            {message.content.filter((b) => b.type === 'image').map((block, idx) => (
+              <img
+                key={idx}
+                src={`data:${block.image!.mimeType};base64,${block.image!.data}`}
+                alt=""
+                className="max-w-[200px] max-h-[200px] rounded-sm"
+              />
+            ))}
+          </div>
+        )}
+
+        {/* 元信息 + 操作按钮（隐性设计，hover 才出现） */}
+        <div
+          className={`flex items-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${isUser ? 'justify-end' : 'justify-start'}`}
+        >
           {!isUser && !isStreaming && message.generationTime && (
-            <span className="text-[11px] text-text-secondary/70 font-mono">
+            <span className="text-[10px] font-mono" style={{ color: T.textMuted, opacity: 0.7 }}>
               {(message.generationTime / 1000).toFixed(1)}s
             </span>
           )}
-          {/* 缓存命中 */}
           {!isUser && message.cacheHit && (
-            <span className="text-[11px] text-accent/80 font-mono" title={`缓存读取 ${message.cacheReadTokens} tokens`}>
+            <span className="text-[10px] font-mono" style={{ color: T.accent, opacity: 0.8 }}
+              title={`缓存读取 ${message.cacheReadTokens} tokens`}>
               cache
             </span>
           )}
-          {/* Token 用量 */}
           {!isUser && message.outputTokens && (
-            <span className="text-[11px] text-text-secondary/70 font-mono">
+            <span className="text-[10px] font-mono" style={{ color: T.textMuted, opacity: 0.7 }}>
               {message.outputTokens}t
             </span>
           )}
           {onPin && (
             <button
               onClick={onPin}
-              className={`p-1.5 rounded-md hover:bg-bg-tertiary transition-colors duration-120 ${message.pinned ? 'text-accent' : 'text-text-secondary/60 hover:text-text-secondary'}`}
+              className="p-1 transition-colors"
+              style={{ color: message.pinned ? T.orange : T.textMuted }}
               title={message.pinned ? '取消锚点' : '标记为锚点'}
+              onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = message.pinned ? T.orange : T.textMuted)}
             >
-              <Pin className="w-3.5 h-3.5" />
+              <Anchor size={14} strokeWidth={1.5} />
             </button>
           )}
           {onBranch && (
             <button
               onClick={onBranch}
-              className="p-1.5 rounded-md hover:bg-bg-tertiary transition-colors duration-120 text-text-secondary/60 hover:text-text-secondary"
+              className="p-1 transition-colors"
+              style={{ color: T.textMuted }}
               title="从此处分叉对话"
+              onMouseEnter={(e) => (e.currentTarget.style.color = T.accent)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
             >
-              <GitBranch className="w-3.5 h-3.5" />
+              <GitBranch size={14} strokeWidth={1.5} />
             </button>
           )}
           {onDelete && (
             <button
               onClick={onDelete}
-              className="p-1.5 rounded-md hover:bg-warning/10 transition-colors duration-120 text-text-secondary/60 hover:text-warning"
+              className="p-1 transition-colors"
+              style={{ color: T.textMuted }}
               title="删除消息"
+              onMouseEnter={(e) => (e.currentTarget.style.color = T.warning)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 size={14} strokeWidth={1.5} />
             </button>
           )}
         </div>
@@ -157,7 +180,9 @@ export function Chat() {
   const deleteMessage = useConversationsStore((state) => state.deleteMessage)
   const createBranch = useConversationsStore((state) => state.createBranch)
   const selectConversation = useConversationsStore((state) => state.selectConversation)
-  const setSettingsPanelOpen = useSettingsStore((state) => state.setSettingsPanelOpen)
+  const setNewConversationDialogOpen = useSettingsStore((state) => state.setNewConversationDialogOpen)
+  const { t } = useTranslation()
+
   const [archiveLoaded, setArchiveLoaded] = useState(false)
 
   // 直接从 store 获取 streaming 状态，不通过 useChat
@@ -174,7 +199,7 @@ export function Chat() {
   const { exportAsMarkdown, exportAsText, isExporting, listMdFiles, exportSelectedMdAsDesign, saveToFile } = useExport()
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<ContentBlock[]>([])
-  const [showExportMenu, setShowExportMenu] = useState(false)
+
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null)
   const [showContextSelector, setShowContextSelector] = useState(false)
   const [manualContextIds, setManualContextIds] = useState<string[] | null>(null)
@@ -253,16 +278,6 @@ export function Chat() {
     // 3秒后取消高亮
     setTimeout(() => setHighlightMessageId(null), 3000)
   }, [])
-
-  // Textarea 自动调整高度
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-
-    textarea.style.height = '24px'
-    const scrollHeight = textarea.scrollHeight
-    textarea.style.height = `${Math.min(scrollHeight, 200)}px`
-  }, [input])
 
   const messages = currentConversation?.messages || []
 
@@ -360,26 +375,6 @@ export function Chat() {
     setPendingImages((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const handleTextFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files) return
-
-    for (const file of Array.from(files)) {
-      if (!file.name.endsWith('.txt') && !file.name.endsWith('.md')) continue
-      try {
-        const text = await file.text()
-        setInput((prev) => {
-          const separator = prev.trim() ? '\n\n' : ''
-          return prev + separator + `【文件：${file.name}】\n${text}`
-        })
-      } catch (error) {
-        console.error('Failed to read file:', error)
-      }
-    }
-
-    e.target.value = ''
-  }
-
   // 拖放文件处理
   const [isDragging, setIsDragging] = useState(false)
 
@@ -438,269 +433,332 @@ export function Chat() {
     }
   }, [])
 
-  // 没有选择对话时显示欢迎界面
+  // ============================================================
+  // 欢迎界面 — 100% 照搬 UnitRedesign.jsx !activeSessionId 分支
+  // ============================================================
   if (!currentConversation) {
     return (
-      <div className="flex-1 flex flex-col h-full bg-bg-primary">
-        <div className="h-12 drag-region flex items-center justify-center border-b border-border">
-          <span className="text-sm text-text-secondary">选择或新建一个对话</span>
-        </div>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center space-y-6">
-            <div>
-              <p className="text-text-primary text-[15px] font-medium tracking-wide">Unit</p>
-              <p className="text-[13px] text-text-secondary/80 mt-3 leading-relaxed max-w-[320px] mx-auto">
-                专注于游戏、影视、文学作品<br/>设定内容的深度讨论
-              </p>
+      <main
+        className="flex-1 flex flex-col relative overflow-hidden"
+        style={{ backgroundColor: T.mainBg, color: T.textPrimary }}
+      >
+        {/* 顶部拖拽占位 */}
+        <div
+          className="absolute top-0 left-0 w-full h-12"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        />
+
+        {/* 封面内容 — 100% 照搬原型 flex flex-col items-center 垂直轴结构 */}
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center relative">
+          <div className="flex flex-col items-center">
+            {/* 同心圆标志 */}
+            <div className="mb-10 relative">
+              <div
+                className="w-32 h-32 border rounded-full flex items-center justify-center"
+                style={{ borderColor: T.border }}
+              >
+                <div
+                  className="w-16 h-16 border rounded-full flex items-center justify-center"
+                  style={{
+                    borderColor: T.orange,
+                    boxShadow: '0 0 15px rgba(212,119,0,0.15)',
+                  }}
+                >
+                  <div
+                    className="w-1 h-1 rounded-full"
+                    style={{ backgroundColor: T.orange }}
+                  />
+                </div>
+              </div>
             </div>
-            <button
-              onClick={() => setSettingsPanelOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-bg-secondary active:scale-95 transition-all duration-120 text-sm text-text-secondary hover:text-text-primary"
+
+            {/* pl-[0.5em] 补偿 tracking 造成的视觉不对称 */}
+            <h1
+              className="text-4xl font-bold tracking-[0.5em] mb-4 font-mono opacity-80 pl-[0.5em]"
+              style={{ color: T.textPrimary }}
             >
-              <Settings className="w-4 h-4" />
-              配置 API
+              UNIT
+            </h1>
+            <p
+              className="text-[10px] font-bold uppercase tracking-[0.3em] mb-12"
+              style={{ color: T.textMuted }}
+            >
+              {t('standbyDesc')}
+            </p>
+            <button
+              onClick={() => setNewConversationDialogOpen(true)}
+              className="flex items-center gap-3 px-8 py-3 rounded-sm transition-all text-[11px] font-bold uppercase tracking-[0.2em] shadow-md hover:brightness-110 active:translate-y-px"
+              style={{ backgroundColor: T.accent, color: T.mainBg }}
+            >
+              <Plus size={14} strokeWidth={3} />
+              {t('newChat')}
             </button>
           </div>
         </div>
-      </div>
+      </main>
     )
   }
 
+  // ============================================================
+  // 主聊天界面 — 100% 照搬 UnitRedesign.jsx activeSessionId 分支
+  // ============================================================
   return (
-    <div className="flex-1 flex flex-col h-full bg-bg-primary">
-      {/* 标题栏 */}
-      <div className="h-12 drag-region flex items-center justify-between px-4 border-b border-border">
-        <div className="flex items-center gap-2 no-drag">
-          <span className="text-[13px] font-medium text-text-primary truncate max-w-[300px]">
+    <main
+      className="flex-1 flex flex-col relative overflow-hidden"
+      style={{ backgroundColor: T.mainBg }}
+    >
+      {/* 标题栏 — 可拖拽区域 */}
+      <header
+        className="h-12 w-full px-12 flex items-center justify-between shrink-0"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      >
+        <div
+          className="flex items-center gap-3"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          {/* 状态指示灯 */}
+          <div
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{
+              backgroundColor: T.statusGreen,
+              boxShadow: `0 0 6px ${T.statusGreen}4d`,
+            }}
+          />
+          <span
+            className="text-[11px] font-medium tracking-widest truncate max-w-[300px]"
+            style={{ color: T.textPrimary }}
+          >
             {currentConversation.name}
           </span>
-          {currentConversation.projectPath && (
-            <span title={currentConversation.projectPath}>
-              <FileText className="w-[13px] h-[13px] text-text-secondary/60" />
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 no-drag">
           {/* 上下文统计 */}
           {contextStats && (
-            <span className="text-[11px] text-text-secondary/70 font-mono">
-              {contextStats.carried}/{contextStats.total}
-              {contextStats.pinned > 0 && ` · ${contextStats.pinned}📌`}
+            <span className="text-[10px] font-mono" style={{ color: T.textMuted, opacity: 0.6 }}>
+              携带 {contextStats.carried} / {contextStats.total}
+              {contextStats.pinned > 0 && ` · ${contextStats.pinned}⚓`}
             </span>
           )}
-
           {/* 费用预估 */}
           {costEstimate && costEstimate.hasPricing && (
-            <span className="text-[11px] text-text-secondary/70 font-mono">
+            <span className="text-[10px] font-mono" style={{ color: T.textMuted, opacity: 0.6 }}>
               {costEstimate.estimatedCost}
             </span>
           )}
-
           {/* 累计费用 */}
           {currentConversation.totalCost > 0 && (
-            <span className="text-[11px] text-text-secondary/70 font-mono">
+            <span className="text-[10px] font-mono" style={{ color: T.textMuted, opacity: 0.5 }}>
               ${(currentConversation.totalCost || 0).toFixed(3)}
             </span>
           )}
+        </div>
 
+        {/* 右侧操作区 — 3 图标，右对齐等距，向右贴到 px-12 边界 */}
+        <div
+          className="flex items-center gap-6"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
           {/* 搜索 */}
           {messages.length > 0 && (
             <ChatSearch onHighlight={handleHighlight} />
           )}
 
-          {/* 导出菜单 */}
+          {/* 导出 — group-hover 悬浮下拉，完全无背景 */}
           {messages.length > 0 && (
-            <div className="relative">
+            <div className="relative group">
+              {/* 触发图标：纯透明，strokeWidth 1.5，hover 橙 */}
               <button
-                onClick={() => setShowExportMenu(!showExportMenu)}
-                className="flex items-center gap-1 px-2 py-1 rounded hover:bg-bg-secondary transition-colors text-text-secondary"
+                className="flex items-center gap-0.5 transition-colors"
+                style={{ color: T.textMuted }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+                title="导出"
               >
-                <Download className="w-4 h-4" />
-                <ChevronDown className="w-3 h-3" />
+                <Download size={16} strokeWidth={1.5} />
+                <ChevronDown size={12} strokeWidth={1.5} />
               </button>
 
-              {showExportMenu && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowExportMenu(false)}
-                  />
-                  <div className="absolute right-0 top-full mt-2 z-50 min-w-[180px] bg-bg-primary rounded-xl shadow-xl border border-border py-1">
+              {/* 悬浮下拉面板 — group-hover 控制，无需 state */}
+              <div
+                className="absolute right-0 top-full mt-2 z-50 min-w-[160px] border py-1 rounded-sm opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity duration-150"
+                style={{
+                  backgroundColor: T.mainBg,
+                  borderColor: T.border,
+                  boxShadow: '0 8px 30px rgba(43,42,39,0.08)',
+                }}
+              >
+                {[
+                  { label: t('exportMarkdown'), action: async () => { const r = await exportAsMarkdown(); if (r.success) alert('导出成功'); else alert('导出失败: ' + r.error) } },
+                  { label: t('exportPinned'), action: async () => { const r = await exportAsMarkdown({ onlyPinned: true }); if (r.success) alert('导出成功'); else alert('导出失败: ' + r.error) } },
+                  { label: t('exportText'), action: async () => { const r = await exportAsText(); if (r.success) alert('导出成功'); else alert('导出失败: ' + r.error) } },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={item.action}
+                    className="w-full py-2 px-4 text-left text-[12px] transition-colors"
+                    style={{ color: T.textMuted }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = T.hoverBg; e.currentTarget.style.color = T.textPrimary }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = T.textMuted }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {currentConversation.projectPath && (
+                  <>
+                    {/* 分割线 — 照搬原型，1px，border 色，opacity 0.5 */}
+                    <div className="h-[1px] w-full my-1" style={{ backgroundColor: T.border, opacity: 0.5 }} />
                     <button
                       onClick={async () => {
-                        const result = await exportAsMarkdown()
-                        setShowExportMenu(false)
-                        if (result.success) {
-                          alert('导出成功')
-                        } else {
-                          alert('导出失败: ' + result.error)
-                        }
+                        const files = await listMdFiles()
+                        setMdFiles(files)
+                        setSelectedMdFile(files[0] || '')
+                        setDesignOutputName('design-' + Date.now() + '.md')
+                        setShowDesignDocPanel(true)
                       }}
-                      className="w-full py-2 text-left text-sm hover:bg-bg-secondary/80 rounded-lg transition-all duration-120 text-text-secondary hover:text-text-primary"
-                      style={{ paddingLeft: '14px', paddingRight: '12px' }}
+                      className="w-full py-2 px-4 text-left text-[12px] transition-colors"
+                      style={{ color: T.textMuted }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = T.hoverBg; e.currentTarget.style.color = T.textPrimary }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = T.textMuted }}
                     >
-                      导出为 Markdown
+                      {t('exportDesignDoc')}
                     </button>
-                    <button
-                      onClick={async () => {
-                        const result = await exportAsMarkdown({ onlyPinned: true })
-                        setShowExportMenu(false)
-                        if (result.success) {
-                          alert('导出成功')
-                        } else {
-                          alert('导出失败: ' + result.error)
-                        }
-                      }}
-                      className="w-full py-2 text-left text-sm hover:bg-bg-secondary/80 rounded-lg transition-all duration-120 text-text-secondary hover:text-text-primary"
-                      style={{ paddingLeft: '14px', paddingRight: '12px' }}
-                    >
-                      仅导出锚点消息
-                    </button>
-                    <button
-                      onClick={async () => {
-                        const result = await exportAsText()
-                        setShowExportMenu(false)
-                        if (result.success) {
-                          alert('导出成功')
-                        } else {
-                          alert('导出失败: ' + result.error)
-                        }
-                      }}
-                      className="w-full py-2 text-left text-sm hover:bg-bg-secondary/80 rounded-lg transition-all duration-120 text-text-secondary hover:text-text-primary"
-                      style={{ paddingLeft: '14px', paddingRight: '12px' }}
-                    >
-                      导出为纯文本
-                    </button>
-                    {currentConversation.projectPath && (
-                      <button
-                        onClick={async () => {
-                          setShowExportMenu(false)
-                          const files = await listMdFiles()
-                          setMdFiles(files)
-                          setSelectedMdFile(files[0] || '')
-                          setDesignOutputName('design-' + Date.now() + '.md')
-                          setShowDesignDocPanel(true)
-                        }}
-                        className="w-full py-2 text-left text-sm hover:bg-bg-secondary/80 rounded-lg transition-all duration-120 text-text-secondary hover:text-text-primary"
-                        style={{ paddingLeft: '14px', paddingRight: '12px' }}
-                      >
-                        策划文档转换
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
+                  </>
+                )}
+              </div>
             </div>
           )}
 
+          {/* 重新生成 — 纯图标，hover 橙 */}
           {!isStreaming && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
             <button
               onClick={regenerateLastMessage}
-              className="p-2 rounded-lg hover:bg-bg-secondary transition-all duration-120 text-text-secondary/60 hover:text-text-secondary"
-              title="重新生成"
+              className="transition-colors"
+              style={{ color: T.textMuted }}
+              title={t('regenerate')}
+              onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
             >
-              <RefreshCw className="w-[16px] h-[16px]" />
+              <RefreshCw size={16} strokeWidth={1.5} />
             </button>
+          )}
+        </div>
+      </header>
+
+      {/* 消息区域 — w-full px-12 与 footer 黄金对齐轴 */}
+      <div
+        ref={parentRef}
+        className="flex-1 overflow-y-auto border-t"
+        style={{ borderColor: T.border }}
+      >
+        <div className="w-full px-12 py-8 space-y-8">
+          {/* 档案已加载提示 */}
+          {archiveLoaded && (
+            <div className="w-full text-center">
+              <span className="text-[11px] italic tracking-wide" style={{ color: T.textMuted }}>
+                {t('systemReady')}
+              </span>
+            </div>
+          )}
+
+          {messages.length === 0 && !isStreaming && !archiveLoaded && (
+            <div className="flex items-center justify-center py-24">
+              <p className="text-[12px]" style={{ color: T.textMuted, opacity: 0.5 }}>
+                {t('startChat')}
+              </p>
+            </div>
+          )}
+
+          {(messages.length > 0 || isStreaming) && (
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualItem) => {
+                const isStreamingItem = virtualItem.index === messages.length
+                const message = isStreamingItem ? null : messages[virtualItem.index]
+
+                return (
+                  <div
+                    key={virtualItem.key}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                    data-index={virtualItem.index}
+                    ref={virtualizer.measureElement}
+                  >
+                    {isStreamingItem ? (
+                      <MessageItem
+                        message={{ id: 'streaming', role: 'assistant', content: [], pinned: false, createdAt: Date.now() }}
+                        isStreaming
+                        streamingContent={streamingContent}
+                      />
+                    ) : message ? (
+                      <MessageItem
+                        message={message}
+                        highlightKeyword={highlightMessageId === message.id ? undefined : undefined}
+                        isHighlighted={highlightMessageId === message.id}
+                        onPin={() => toggleMessagePinned(message.id)}
+                        onDelete={() => deleteMessage(message.id)}
+                        onBranch={async () => {
+                          if (currentConversation) {
+                            const newId = await createBranch(currentConversation.id, message.id)
+                            selectConversation(newId)
+                          }
+                        }}
+                      />
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
       </div>
 
-      {/* 消息区域 */}
-      <div ref={parentRef} className="flex-1 overflow-y-auto">
-        {messages.length === 0 && !isStreaming ? (
-          <div className="flex items-center justify-center h-full">
-            {archiveLoaded ? (
-              <p className="text-accent text-sm">已读取项目档案，了解之前的讨论内容，可以开始新的对话。</p>
-            ) : (
-              <p className="text-text-secondary text-sm">开始对话吧</p>
-            )}
-          </div>
-        ) : (
-          <>
-          {archiveLoaded && (
-            <div className="px-6 pt-4 pb-2">
-              <p className="text-[12px] text-accent/80 text-center">已读取项目档案，了解之前的讨论内容，可以开始新的对话。</p>
-            </div>
-          )}
-          <div
-            style={{
-              height: `${virtualizer.getTotalSize()}px`,
-              width: '100%',
-              position: 'relative',
-            }}
-          >
-            {virtualizer.getVirtualItems().map((virtualItem) => {
-              const isStreamingItem = virtualItem.index === messages.length
-              const message = isStreamingItem ? null : messages[virtualItem.index]
-
-              return (
-                <div
-                  key={virtualItem.key}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${virtualItem.start}px)`,
-                  }}
-                  data-index={virtualItem.index}
-                  ref={virtualizer.measureElement}
-                >
-                  {isStreamingItem ? (
-                    <MessageItem
-                      message={{ id: 'streaming', role: 'assistant', content: [], pinned: false, createdAt: Date.now() }}
-                      isStreaming
-                      streamingContent={streamingContent}
-                    />
-                  ) : message ? (
-                    <MessageItem
-                      message={message}
-                      isHighlighted={highlightMessageId === message.id}
-                      onPin={() => toggleMessagePinned(message.id)}
-                      onDelete={() => deleteMessage(message.id)}
-                      onBranch={async () => {
-                        if (currentConversation) {
-                          const newId = await createBranch(currentConversation.id, message.id)
-                          selectConversation(newId)
-                        }
-                      }}
-                    />
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
-          </>
-        )}
-      </div>
-
-      {/* 输入区域 */}
-      <div
-        className={`border-t border-border p-4 transition-colors ${isDragging ? 'bg-accent/10' : ''}`}
+      {/* 输入区域 — 100% 照搬 UnitRedesign.jsx footer */}
+      <footer
+        className="w-full px-12 py-8 border-t z-10 shrink-0"
+        style={{
+          backgroundColor: isDragging ? 'rgba(71,92,77,0.06)' : T.sidebarBg,
+          borderColor: T.border,
+          transition: 'background-color 120ms',
+        }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <div className="max-w-3xl mx-auto relative">
+        <div className="w-full relative group flex flex-col">
           {/* 拖放提示 */}
           {isDragging && (
-            <div className="absolute inset-0 flex items-center justify-center bg-bg-primary/80 rounded-lg z-10 pointer-events-none">
-              <p className="text-accent font-medium">拖放图片或文本文件到这里</p>
+            <div
+              className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none rounded-sm"
+              style={{ backgroundColor: `${T.mainBg}d9` }}
+            >
+              <p className="text-[12px] font-bold uppercase tracking-widest" style={{ color: T.accent }}>
+                拖放图片或文本文件到这里
+              </p>
             </div>
           )}
+
           {/* 待发送的图片预览 */}
           {pendingImages.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
+            <div className="flex flex-wrap gap-2 mb-3">
               {pendingImages.map((block, idx) => (
                 <div key={idx} className="relative">
                   <img
                     src={`data:${block.image!.mimeType};base64,${block.image!.data}`}
                     alt=""
-                    className="w-16 h-16 object-cover rounded"
+                    className="w-14 h-14 object-cover rounded-sm"
                   />
                   <button
                     onClick={() => handleRemovePendingImage(idx)}
-                    className="absolute -top-1 -right-1 w-4 h-4 bg-warning text-white rounded-full text-xs flex items-center justify-center"
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-xs flex items-center justify-center"
+                    style={{ backgroundColor: T.warning, color: T.mainBg }}
                   >
                     ×
                   </button>
@@ -709,85 +767,124 @@ export function Chat() {
             </div>
           )}
 
-          <div className="flex items-end gap-3 bg-bg-secondary rounded-2xl px-5 py-4 border border-border/40 focus-within:border-accent/30 transition-colors duration-120">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault()
-                  handleSend()
-                }
-              }}
-              placeholder={canSend ? "输入消息，⌘↩ 发送..." : "请先配置 API"}
-              rows={1}
-              disabled={!canSend || isStreaming}
-              className="flex-1 resize-none min-h-[24px] max-h-[200px] text-[14px] leading-[1.6] text-text-primary placeholder:text-text-secondary/60 disabled:opacity-50"
-            />
-            <div className="flex items-center gap-2">
-              <label className="p-2 rounded-lg hover:bg-bg-tertiary transition-all duration-120 text-text-secondary/60 hover:text-text-secondary cursor-pointer" title="上传文本文件 (.txt / .md)">
-                <Paperclip className="w-[18px] h-[18px]" />
-                <input
-                  type="file"
-                  accept=".txt,.md"
-                  multiple
-                  onChange={handleTextFileUpload}
-                  className="hidden"
-                  disabled={!canSend || isStreaming}
-                />
-              </label>
-              <label className="p-2 rounded-lg hover:bg-bg-tertiary transition-all duration-120 text-text-secondary/60 hover:text-text-secondary cursor-pointer" title="上传图片">
-                <ImageIcon className="w-[18px] h-[18px]" />
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handleImageUpload}
-                  className="hidden"
-                  disabled={!canSend || isStreaming}
-                />
-              </label>
-              {/* 手动选择上下文 */}
-              {currentConversation && currentConversation.messages.length > 0 && (
-                <button
-                  onClick={() => setShowContextSelector(true)}
-                  disabled={isStreaming}
-                  className={`p-2 rounded-lg hover:bg-bg-tertiary transition-all duration-120 disabled:opacity-40 ${
-                    manualContextIds ? 'text-accent' : 'text-text-secondary/60 hover:text-text-secondary'
-                  }`}
-                  title={manualContextIds ? `已手动选择 ${manualContextIds.length} 条上下文` : '选择发送的上下文'}
+          {/* 输入框 — min-h 自然撑开，去除固定 h-32 */}
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                handleSend()
+              }
+            }}
+            placeholder={canSend ? t('placeholder') : t('placeholderNoApi')}
+            disabled={!canSend || isStreaming}
+            className="w-full min-h-[80px] max-h-[40vh] bg-transparent text-sm resize-none focus:outline-none leading-relaxed placeholder:opacity-40 disabled:opacity-50"
+            style={{ color: T.textPrimary }}
+          />
+
+          {/* 底部工具栏 */}
+          <div className="flex items-center justify-between mt-2 pt-2">
+            {/* 左侧：Upload + 快捷键提示（档案入口已移至 sidebar） */}
+            <div className="flex items-center gap-6">
+              <div
+                className="flex items-center gap-5 pr-6 border-r opacity-40 group-focus-within:opacity-100 transition-opacity"
+                style={{ borderColor: T.border, color: T.textMuted }}
+              >
+                {/* Upload — 图片上传 */}
+                <label
+                  className="cursor-pointer transition-colors"
+                  title="上传图片"
+                  onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
                 >
-                  <ListFilter className="w-[18px] h-[18px]" />
-                </button>
-              )}
+                  <Upload size={18} strokeWidth={1.5} />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleImageUpload}
+                    className="hidden"
+                    disabled={!canSend || isStreaming}
+                  />
+                </label>
+              </div>
+              <span className="text-[10px] tracking-tighter hidden sm:inline-block" style={{ color: T.textMuted }}>
+                {t('shortcut')}
+              </span>
+            </div>
+
+            {/* 右侧：ListFilter + Send */}
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setShowContextSelector(true)}
+                disabled={isStreaming}
+                className="p-2 rounded-sm transition-all disabled:opacity-40"
+                style={{
+                  color: manualContextIds ? T.orange : T.textMuted,
+                  opacity: manualContextIds ? 1 : 0.4,
+                }}
+                title={manualContextIds ? `已手动选择 ${manualContextIds.length} 条上下文` : '选择发送的上下文'}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.opacity = '1'
+                  if (!manualContextIds) e.currentTarget.style.color = T.orange
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = manualContextIds ? '1' : '0.4'
+                  if (!manualContextIds) e.currentTarget.style.color = T.textMuted
+                }}
+              >
+                <ListFilter size={20} strokeWidth={1.5} />
+              </button>
               <button
                 onClick={handleSend}
                 disabled={!canSend || isStreaming || (!input.trim() && pendingImages.length === 0)}
-                className="p-2 rounded-xl hover:bg-bg-tertiary active:scale-95 transition-all duration-120 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 text-text-secondary/60 hover:text-text-secondary"
+                className="w-12 h-12 flex items-center justify-center transition-all shadow-sm active:translate-y-px disabled:opacity-40 disabled:cursor-not-allowed disabled:active:translate-y-0 rounded-sm hover:opacity-90"
+                style={{ backgroundColor: T.accent, color: T.mainBg }}
                 title="发送"
               >
-                <Send className="w-5 h-5" />
+                <Send size={18} strokeWidth={1.5} />
               </button>
             </div>
           </div>
         </div>
-      </div>
+      </footer>
 
       {/* 长内容导出提示 */}
       {longContentPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="w-80 bg-bg-primary rounded-xl shadow-2xl p-5 border border-border">
-            <h3 className="text-sm font-medium text-text-primary mb-2">内容较长，是否导出为 md 文件？</h3>
-            <p className="text-xs text-text-secondary mb-4">内容共 {longContentPrompt.content.length} 字，可导出到绑定目录</p>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(43,42,39,0.2)' }}
+        >
+          <div
+            className="w-80 border shadow-2xl rounded-sm p-6 space-y-4"
+            style={{ backgroundColor: T.mainBg, borderColor: T.border }}
+          >
+            <h3 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+              内容较长
+            </h3>
+            <p className="text-sm leading-relaxed" style={{ color: T.textPrimary }}>
+              内容共 {longContentPrompt.content.length} 字，是否导出为 md 文件？
+            </p>
             <input
               type="text"
               value={exportFileName}
               onChange={(e) => setExportFileName(e.target.value)}
               placeholder="文件名（如 output.md）"
-              className="w-full px-3 py-1.5 text-sm bg-bg-secondary border border-border rounded-lg mb-3 focus:outline-none focus:border-accent"
+              className="w-full border-b py-1.5 text-sm outline-none bg-transparent"
+              style={{ borderColor: T.border, color: T.textPrimary }}
             />
-            <div className="flex gap-2">
+            <div className="flex justify-end gap-6 pt-2">
+              <button
+                onClick={() => setLongContentPrompt(null)}
+                className="text-[13px] transition-colors"
+                style={{ color: T.textMuted }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = T.textPrimary)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+              >
+                在对话中显示
+              </button>
               <button
                 onClick={async () => {
                   if (!exportFileName.trim()) return
@@ -800,15 +897,12 @@ export function Chat() {
                   }
                   setLongContentPrompt(null)
                 }}
-                className="flex-1 px-3 py-2 text-sm rounded-xl bg-accent/10 hover:bg-accent/20 transition-all duration-120 text-accent font-medium"
+                className="text-[13px] transition-colors"
+                style={{ color: T.textPrimary }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = T.accent)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = T.textPrimary)}
               >
-                导出
-              </button>
-              <button
-                onClick={() => setLongContentPrompt(null)}
-                className="flex-1 px-3 py-2 text-sm rounded-xl border border-border/60 hover:bg-bg-secondary transition-all duration-120 text-text-secondary"
-              >
-                在对话中显示
+                导出文件
               </button>
             </div>
           </div>
@@ -817,38 +911,63 @@ export function Chat() {
 
       {/* 策划文档转换面板 */}
       {showDesignDocPanel && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="w-96 bg-bg-primary rounded-xl shadow-2xl p-5 border border-border">
-            <h3 className="text-sm font-medium text-text-primary mb-4">策划文档转换</h3>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+          style={{ backgroundColor: 'rgba(43,42,39,0.2)' }}
+        >
+          <div
+            className="w-96 border shadow-2xl rounded-sm p-6 space-y-5"
+            style={{ backgroundColor: T.mainBg, borderColor: T.border }}
+          >
+            <h3 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+              {t('exportDesignDoc')}
+            </h3>
             {mdFiles.length === 0 ? (
-              <p className="text-sm text-text-secondary mb-4">绑定目录中未找到 .md 文件</p>
+              <p className="text-sm leading-relaxed" style={{ color: T.textPrimary }}>
+                绑定目录中未找到 .md 文件
+              </p>
             ) : (
               <>
-                <div className="mb-3">
-                  <label className="text-xs text-text-secondary mb-1 block">选择输入文件</label>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                    选择输入文件
+                  </label>
                   <select
                     value={selectedMdFile}
                     onChange={(e) => setSelectedMdFile(e.target.value)}
-                    className="w-full px-3 py-1.5 text-sm bg-bg-secondary border border-border rounded-lg focus:outline-none focus:border-accent"
+                    className="w-full border py-1.5 px-2 text-sm rounded-sm"
+                    style={{ backgroundColor: T.sidebarBg, borderColor: T.border, color: T.textPrimary }}
                   >
                     {mdFiles.map((f) => (
                       <option key={f} value={f}>{f}</option>
                     ))}
                   </select>
                 </div>
-                <div className="mb-4">
-                  <label className="text-xs text-text-secondary mb-1 block">输出文件名</label>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                    输出文件名
+                  </label>
                   <input
                     type="text"
                     value={designOutputName}
                     onChange={(e) => setDesignOutputName(e.target.value)}
                     placeholder="如 design.md"
-                    className="w-full px-3 py-1.5 text-sm bg-bg-secondary border border-border rounded-lg focus:outline-none focus:border-accent"
+                    className="w-full border-b py-1 text-sm bg-transparent"
+                    style={{ borderColor: T.border, color: T.textPrimary }}
                   />
                 </div>
               </>
             )}
-            <div className="flex gap-2">
+            <div className="flex justify-end gap-6 pt-1">
+              <button
+                onClick={() => setShowDesignDocPanel(false)}
+                className="text-[13px] transition-colors"
+                style={{ color: T.textMuted }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = T.textPrimary)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+              >
+                取消
+              </button>
               <button
                 onClick={async () => {
                   if (!selectedMdFile || !designOutputName.trim()) return
@@ -862,15 +981,12 @@ export function Chat() {
                   }
                 }}
                 disabled={isExporting || mdFiles.length === 0}
-                className="flex-1 px-3 py-2 text-sm rounded-xl bg-accent/10 hover:bg-accent/20 transition-all duration-120 text-accent font-medium disabled:opacity-50"
+                className="text-[13px] transition-colors disabled:opacity-50"
+                style={{ color: T.textPrimary }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = T.accent)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = T.textPrimary)}
               >
                 {isExporting ? '转换中...' : '开始转换'}
-              </button>
-              <button
-                onClick={() => setShowDesignDocPanel(false)}
-                className="flex-1 px-3 py-2 text-sm rounded-xl border border-border/60 hover:bg-bg-secondary transition-all duration-120 text-text-secondary"
-              >
-                取消
               </button>
             </div>
           </div>
@@ -892,6 +1008,6 @@ export function Chat() {
         selectedIndex={selectedIndex}
         onSelect={selectEntry}
       />
-    </div>
+    </main>
   )
 }

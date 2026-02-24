@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useConversationsStore } from '@/store/conversations'
+import { T } from '@/lib/tokens'
+import { useTranslation } from '@/lib/i18n'
 
 interface ArchiveMentionProps {
   input: string
@@ -180,27 +182,38 @@ export function ArchiveMentionPicker({
   selectedIndex: number
   onSelect: (entry: ArchiveEntry) => void
 }) {
+  const { t } = useTranslation()
   if (!show || entries.length === 0) return null
 
   return (
     <div
-      className="fixed z-50 w-72 bg-bg-primary rounded-lg shadow-xl border border-border py-1 max-h-60 overflow-y-auto"
-      style={{ top: position.top, left: position.left }}
+      className="fixed z-50 w-72 border shadow-xl py-1 max-h-60 overflow-y-auto rounded-sm"
+      style={{
+        top: position.top,
+        left: position.left,
+        backgroundColor: T.mainBg,
+        borderColor: T.border,
+      }}
     >
-      <div className="px-3 py-1 text-xs text-text-secondary border-b border-border">
-        选择档案条目
+      <div
+        className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest border-b"
+        style={{ color: T.textMuted, borderColor: T.border }}
+      >
+        {t('archiveMenuTitle')}
       </div>
       {entries.map((entry, index) => (
         <button
           key={`${entry.category}-${index}`}
           onClick={() => onSelect(entry)}
-          className={`w-full px-3 py-2 text-left text-sm transition-colors ${
-            index === selectedIndex
-              ? 'bg-bg-secondary text-text-primary'
-              : 'text-text-secondary hover:bg-bg-secondary hover:text-text-primary'
-          }`}
+          className="w-full px-3 py-2 text-left text-sm transition-colors"
+          style={{
+            backgroundColor: index === selectedIndex ? T.sidebarBg : 'transparent',
+            color: T.textPrimary,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = T.sidebarBg)}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = index === selectedIndex ? T.sidebarBg : 'transparent')}
         >
-          <span className="text-xs text-accent mr-2">[{entry.category}]</span>
+          <span className="text-[10px] mr-2" style={{ color: T.accent }}>[{entry.category}]</span>
           <span className="line-clamp-1">{entry.content}</span>
         </button>
       ))}

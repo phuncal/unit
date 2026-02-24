@@ -1,145 +1,220 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Tailwind v4 设计令牌 — Dieter Rams 暖色调定稿版
+   ============================================================ */
 @theme {
   /* 背景色 */
-  --color-bg-primary: #F5F5F0;
-  --color-bg-secondary: #EEEDE8;
-  --color-bg-tertiary: #E5E4E0;
+  --color-bg-primary:   #EBE9E4;
+  --color-bg-secondary: #E2DFD8;
+  --color-bg-tertiary:  #D8D5CE;
 
   /* 边框 */
-  --color-border: #D8D6D0;
+  --color-border: #D0CEC8;
 
   /* 文字 */
-  --color-text-primary: #1A1A18;
-  --color-text-secondary: #8A8880;
+  --color-text-primary:   #2B2A27;
+  --color-text-secondary: #8F8C85;
 
   /* 强调色 */
-  --color-accent: #3D6B5E;
-  --color-accent-hover: #2E5248;
+  --color-accent:       #475C4D;
+  --color-accent-hover: #364840;
+
+  /* 指示橙（物理 LED 质感） */
+  --color-orange: #D47700;
 
   /* 警告色 */
   --color-warning: #B85C38;
+
+  /* 状态绿（指示灯） */
+  --color-status-green: #5A8A67;
+
+  /* hover 背景 */
+  --color-hover-bg: rgba(43, 42, 39, 0.05);
 
   /* 字体 */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-mono: "SF Mono", Menlo, Monaco, "Courier New", monospace;
 
   /* 过渡 */
-  --duration-fast: 120ms;
+  --duration-fast:   120ms;
   --duration-normal: 240ms;
-  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-default:    cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
-:root {
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.6;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* ============================================================
+   全局基础重置
+   ============================================================ */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html {
+    font-size: 14px;
+    line-height: 1.6;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #EBE9E4;   /* 硬编码兜底，确保颜色生效 */
+    color: #2B2A27;
+  }
+
+  /* 输入框基础 */
+  input, textarea {
+    font-family: inherit;
+    font-size: inherit;
+    outline: none;
+    background: transparent;
+    border: none;
+    color: inherit;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #8F8C85;
+    opacity: 0.5;
+  }
+
+  /* 按钮基础 */
+  button {
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+  }
+
+  button:focus-visible {
+    outline: 2px solid #475C4D;
+    outline-offset: 2px;
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* 文本选中 */
+  ::selection {
+    background-color: rgba(71, 92, 77, 0.2);
+  }
 }
 
-* {
-  box-sizing: border-box;
-}
+/* ============================================================
+   macOS 标题栏拖拽
+   ============================================================ */
+.drag-region { -webkit-app-region: drag; }
+.no-drag     { -webkit-app-region: no-drag; }
 
-html,
-body,
-#root {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-body {
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-}
-
-/* macOS 标题栏拖拽区域 */
-.drag-region {
-  -webkit-app-region: drag;
-}
-
-.no-drag {
-  -webkit-app-region: no-drag;
-}
-
-/* 自定义滚动条 */
+/* ============================================================
+   物理橙色细线滚动条
+   严格照搬 UnitRedesign.jsx <style> 块
+   ============================================================ */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(43, 42, 39, 0.04);
+  margin: 4px;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 2px;
+  background-color: transparent;
+  border-left:  1.5px solid transparent;
+  border-right: 1.5px solid transparent;
+  background-clip: padding-box;
+  border-radius: 0;
 }
 
+/* 父元素 hover → 显示橙色细线 */
 :hover::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background-color: #D47700;
+  border-left:  1.5px solid transparent;
+  border-right: 1.5px solid transparent;
+  background-clip: padding-box;
 }
 
 :hover::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
+  background-color: #D47700;
 }
 
-/* 输入框样式 */
-input,
-textarea {
-  font-family: inherit;
-  font-size: inherit;
-  outline: none;
+/* ============================================================
+   物理刻度 range 滑块
+   严格照搬 UnitRedesign.jsx <style> 块
+   ============================================================ */
+input[type=range] {
+  -webkit-appearance: none;
   background: transparent;
-  border: none;
-}
-
-input::placeholder,
-textarea::placeholder {
-  color: var(--color-text-secondary);
-}
-
-/* 按钮基础样式 */
-button {
-  font-family: inherit;
-  font-size: inherit;
+  width: 100%;
+  height: 24px;
   cursor: pointer;
-  border: none;
-  background: transparent;
-  padding: 0;
-  margin: 0;
 }
 
-button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+input[type=range]:focus { outline: none; }
+
+input[type=range]::-webkit-slider-runnable-track {
+  background: repeating-linear-gradient(
+    to right,
+    #D0CEC8,
+    #D0CEC8 1px,
+    transparent 1px,
+    transparent 10%
+  );
+  background-size: 100% 6px;
+  background-position: bottom;
+  background-repeat: no-repeat;
+  height: 20px;
+  border-bottom: 1px solid #D0CEC8;
 }
 
-/* 禁用状态 */
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 16px;
+  width:  2px;
+  background: #D47700;
+  cursor: pointer;
+  margin-top: 4px;
 }
 
-/* 选中文本 */
-::selection {
-  background-color: rgba(61, 107, 94, 0.2);
-}
-
-/* 过渡动画 */
+/* ============================================================
+   过渡工具类
+   ============================================================ */
 .transition-fast {
   transition-duration: 120ms;
-  transition-timing-function: var(--ease-default);
+  transition-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 .transition-normal {
   transition-duration: 240ms;
-  transition-timing-function: var(--ease-default);
+  transition-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* ============================================================
+   搜索高亮
+   ============================================================ */
+mark {
+  background-color: rgba(184, 92, 56, 0.25);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
 }

@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, X, ChevronUp, ChevronDown } from 'lucide-react'
 import { useConversationsStore } from '@/store/conversations'
+import { T } from '@/lib/tokens'
 import type { Message } from '@/types'
+import { useTranslation } from '@/lib/i18n'
 
 interface ChatSearchProps {
   onHighlight: (messageId: string) => void
 }
 
 export function ChatSearch({ onHighlight }: ChatSearchProps) {
+  const { t } = useTranslation()
   const { currentConversation, searchMessages } = useConversationsStore()
   const [isOpen, setIsOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
@@ -19,20 +22,14 @@ export function ChatSearch({ onHighlight }: ChatSearchProps) {
       setResults([])
       return
     }
-
     const searchResults = await searchMessages(keyword)
     setResults(searchResults)
     setCurrentIndex(0)
-
-    if (searchResults.length > 0) {
-      onHighlight(searchResults[0].id)
-    }
+    if (searchResults.length > 0) onHighlight(searchResults[0].id)
   }, [keyword, currentConversation, searchMessages, onHighlight])
 
   useEffect(() => {
-    const debounce = setTimeout(() => {
-      handleSearch()
-    }, 300)
+    const debounce = setTimeout(() => { handleSearch() }, 300)
     return () => clearTimeout(debounce)
   }, [keyword, handleSearch])
 
@@ -56,18 +53,14 @@ export function ChatSearch({ onHighlight }: ChatSearchProps) {
     setResults([])
   }
 
-  // 快捷键：Cmd/Ctrl + F 打开搜索
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault()
         setIsOpen(true)
       }
-      if (e.key === 'Escape' && isOpen) {
-        handleClose()
-      }
+      if (e.key === 'Escape' && isOpen) handleClose()
     }
-
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen])
@@ -76,53 +69,70 @@ export function ChatSearch({ onHighlight }: ChatSearchProps) {
 
   return (
     <div className="relative">
-      {/* 搜索按钮 */}
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="p-1 rounded hover:bg-bg-secondary transition-colors text-text-secondary"
-          title="搜索对话 (⌘F)"
+          title={t('searchTooltip')}
+          className="p-1 transition-colors"
+          style={{ color: T.textMuted }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
         >
-          <Search className="w-4 h-4" />
+          <Search size={15} strokeWidth={1.5} />
         </button>
       )}
 
-      {/* 搜索框 */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 z-50 flex items-center gap-1 bg-bg-primary rounded-lg shadow-lg border border-border p-2">
-          <Search className="w-4 h-4 text-text-secondary" />
+        <div
+          className="absolute right-0 top-full mt-1 z-50 flex items-center gap-1 border shadow-lg p-2 rounded-sm"
+          style={{
+            backgroundColor: T.mainBg,
+            borderColor: T.border,
+          }}
+        >
+          <Search size={13} style={{ color: T.textMuted, flexShrink: 0 }} />
           <input
             type="text"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="搜索..."
-            className="w-48 px-2 py-1 text-sm bg-transparent outline-none text-text-primary"
+            placeholder={t('searchPlaceholder')}
+            className="w-44 px-1 py-0.5 text-sm bg-transparent outline-none"
+            style={{ color: T.textPrimary }}
             autoFocus
           />
           {results.length > 0 && (
             <>
-              <span className="text-xs text-text-secondary">
+              <span className="text-[10px] font-mono px-1" style={{ color: T.textMuted }}>
                 {currentIndex + 1}/{results.length}
               </span>
               <button
                 onClick={handlePrev}
-                className="p-1 rounded hover:bg-bg-secondary transition-colors text-text-secondary"
+                className="p-0.5 transition-colors"
+                style={{ color: T.textMuted }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = T.textPrimary)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
               >
-                <ChevronUp className="w-4 h-4" />
+                <ChevronUp size={14} />
               </button>
               <button
                 onClick={handleNext}
-                className="p-1 rounded hover:bg-bg-secondary transition-colors text-text-secondary"
+                className="p-0.5 transition-colors"
+                style={{ color: T.textMuted }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = T.textPrimary)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
               >
-                <ChevronDown className="w-4 h-4" />
+                <ChevronDown size={14} />
               </button>
             </>
           )}
           <button
             onClick={handleClose}
-            className="p-1 rounded hover:bg-bg-secondary transition-colors text-text-secondary"
+            className="p-0.5 transition-colors"
+            style={{ color: T.textMuted }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = T.textPrimary)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
           >
-            <X className="w-4 h-4" />
+            <X size={14} />
           </button>
         </div>
       )}
