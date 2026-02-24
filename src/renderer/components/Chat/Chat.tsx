@@ -468,7 +468,7 @@ export function Chat() {
 
               {/* 透明 PNG：unit_cover.png，保留阴影，禁止混合模式 */}
               <img
-                src="unit_cover.png"
+                src="/unit_cover.png"
                 alt="Unit Typewriter"
                 className="w-full h-auto object-contain opacity-95 drop-shadow-xl"
               />
