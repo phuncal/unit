@@ -585,21 +585,44 @@
     }
 
     /* ── RESPONSIVE ── */
-    @media (max-width: 900px) {
-      nav { padding: 16px 24px; }
-      .hero { grid-template-columns: 1fr; padding: 100px 24px 60px; text-align: center; }
-      .hero-visual { order: -1; }
-      .hero-desc, .hero-actions { margin-left: auto; margin-right: auto; }
-      .hero-actions { justify-content: center; }
-      .features, .philosophy, .cta-section { padding: 80px 24px; }
-      .features-grid { grid-template-columns: 1fr; }
-      .section-header { grid-template-columns: 1fr; gap: 24px; }
-      .steps { grid-template-columns: 1fr 1fr; }
-      .how-it-works { padding: 80px 24px; }
-      .philosophy-grid { grid-template-columns: 1fr; gap: 48px; }
-      .philosophy-left { position: static; }
-      footer { flex-direction: column; gap: 24px; text-align: center; padding: 40px 24px; }
-    }
+@media (max-width: 900px) {
+  nav {
+    padding: 14px 20px;
+  }
+  .nav-links {
+    gap: 16px;
+  }
+  .nav-links li:not(:last-child):not(:nth-last-child(2)) {
+    display: none;
+  }
+  .hero {
+    grid-template-columns: 1fr;
+    padding: 80px 24px 60px;
+    text-align: center;
+    max-width: 100%;
+    gap: 32px;
+  }
+  .hero-visual {
+    order: -1;
+    margin-right: 0;
+  }
+  .hero-image { max-width: 85vw; }
+  .hero-desc { margin: 0 auto; max-width: 340px; }
+  .hero-actions { justify-content: center; }
+  .features, .philosophy, .cta-section { padding: 64px 20px; }
+  .features-grid { grid-template-columns: 1fr; }
+  .section-header { grid-template-columns: 1fr; gap: 16px; }
+  .steps { grid-template-columns: 1fr; }
+  .how-it-works { padding: 64px 20px; }
+  .philosophy-grid { grid-template-columns: 1fr; gap: 40px; }
+  .philosophy-left { position: static; }
+  footer {
+    flex-direction: column;
+    gap: 20px;
+    text-align: center;
+    padding: 32px 20px;
+  }
+}
   </style>
 </head>
 <body>
