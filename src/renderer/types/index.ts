@@ -1,11 +1,27 @@
-export interface Settings {
+export type ReplyStyle = 'concise' | 'standard' | 'detailed'
+
+export const API_CONNECTION_IDS = ['conn-1', 'conn-2', 'conn-3'] as const
+export type ApiConnectionId = typeof API_CONNECTION_IDS[number]
+
+export interface ApiConnection {
+  id: ApiConnectionId
+  name: string
   apiEndpoint: string
   apiKey: string
   modelName: string
+}
+
+export interface Settings {
+  // 当前激活连接（向后兼容：保留顶层字段供现有调用方直接使用）
+  apiEndpoint: string
+  apiKey: string
+  modelName: string
+  activeConnectionId: ApiConnectionId
+  apiConnections: ApiConnection[]
   maxTokens: number
   contextLimit: number
   slidingWindowSize: number      // 滑动窗口大小，默认 20
-  replyStyle: 'concise' | 'standard' | 'detailed'  // 回复风格
+  replyStyle: ReplyStyle         // 回复风格
 }
 
 export interface Conversation {
@@ -13,7 +29,7 @@ export interface Conversation {
   name: string
   projectPath: string | null
   systemPrompt: string
-  replyStyle?: 'concise' | 'standard' | 'detailed'  // 对话级别的回复风格
+  replyStyle?: ReplyStyle        // 对话级别的回复风格
   messages: Message[]
   tokenCount: number
   totalInputTokens: number       // 累计输入 token
@@ -76,6 +92,8 @@ export interface ModelsCache {
   fetchedAt: number       // 获取时间戳
 }
 
+export type ModelsCacheByConnection = Partial<Record<ApiConnectionId, ModelsCache>>
+
 // 模型价格表（美元 / 1K tokens）
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'claude-sonnet-4-5': { input: 0.003, output: 0.015 },
@@ -89,10 +107,87 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   'gemini-1.5-flash': { input: 0.000075, output: 0.0003 },
 }
 
+const DEFAULT_CONNECTION_TEMPLATES: Array<
+  Omit<ApiConnection, 'apiKey'>
+> = [
+  {
+    id: 'conn-1',
+    name: 'Connection 1',
+    apiEndpoint: 'https://api.openai.com/v1',
+    modelName: 'gpt-4o',
+  },
+  {
+    id: 'conn-2',
+    name: 'Connection 2',
+    apiEndpoint: '',
+    modelName: '',
+  },
+  {
+    id: 'conn-3',
+    name: 'Connection 3',
+    apiEndpoint: '',
+    modelName: '',
+  },
+]
+
+export function createDefaultApiConnections(): ApiConnection[] {
+  return DEFAULT_CONNECTION_TEMPLATES.map((conn) => ({
+    ...conn,
+    apiKey: '',
+  }))
+}
+
+export function normalizeApiConnections(
+  source?: Partial<ApiConnection>[]
+): ApiConnection[] {
+  const defaults = createDefaultApiConnections()
+  const input = Array.isArray(source) ? source : []
+
+  return API_CONNECTION_IDS.map((id, index) => {
+    const byId = input.find((conn) => conn?.id === id)
+    const byPosition = input[index]
+    const raw = byId || byPosition || {}
+    const fallback = defaults[index]
+
+    return {
+      id,
+      name: (raw.name || fallback.name).trim() || fallback.name,
+      apiEndpoint: (raw.apiEndpoint || fallback.apiEndpoint).trim(),
+      apiKey: raw.apiKey || '',
+      modelName: (raw.modelName || fallback.modelName).trim(),
+    }
+  })
+}
+
+export function getActiveApiConnection(
+  settings: Pick<Settings, 'apiConnections' | 'activeConnectionId'>
+): ApiConnection {
+  const connections = normalizeApiConnections(settings.apiConnections)
+  return connections.find((conn) => conn.id === settings.activeConnectionId) || connections[0]
+}
+
+export function syncSettingsWithActiveConnection(settings: Settings): Settings {
+  const apiConnections = normalizeApiConnections(settings.apiConnections)
+  const activeConnection = apiConnections.find((conn) => conn.id === settings.activeConnectionId) || apiConnections[0]
+
+  return {
+    ...settings,
+    activeConnectionId: activeConnection.id,
+    apiConnections,
+    apiEndpoint: activeConnection.apiEndpoint,
+    apiKey: activeConnection.apiKey,
+    modelName: activeConnection.modelName,
+  }
+}
+
+const DEFAULT_CONNECTIONS = createDefaultApiConnections()
+
 export const DEFAULT_SETTINGS: Settings = {
-  apiEndpoint: 'https://api.openai.com/v1',
-  apiKey: '',
-  modelName: 'gpt-4o',
+  apiEndpoint: DEFAULT_CONNECTIONS[0].apiEndpoint,
+  apiKey: DEFAULT_CONNECTIONS[0].apiKey,
+  modelName: DEFAULT_CONNECTIONS[0].modelName,
+  activeConnectionId: DEFAULT_CONNECTIONS[0].id,
+  apiConnections: DEFAULT_CONNECTIONS,
   maxTokens: 4096,
   contextLimit: 100000,
   slidingWindowSize: 20,

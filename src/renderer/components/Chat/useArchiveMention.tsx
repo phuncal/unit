@@ -14,6 +14,7 @@ interface ArchiveEntry {
   content: string
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useArchiveMention({ input, inputRef, onInsert }: ArchiveMentionProps) {
   const { currentConversation } = useConversationsStore()
   const [showPicker, setShowPicker] = useState(false)

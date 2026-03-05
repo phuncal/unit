@@ -1,9 +1,17 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { RefreshCw, ChevronDown, Search, Download } from 'lucide-react'
 import { useSettingsStore } from '@/store/settings'
-import { DEFAULT_SETTINGS, type ModelInfo } from '@/types'
+import {
+  DEFAULT_SETTINGS,
+  getActiveApiConnection,
+  normalizeApiConnections,
+  syncSettingsWithActiveConnection,
+  type ApiConnectionId,
+  type ModelInfo,
+} from '@/types'
 import { fetchModels } from '@/api/client'
 import type { UpdateInfo, DownloadProgress } from '@/types/electron'
+import { useUIStore } from '@/store/ui'
 import { T } from '@/lib/tokens'
 import { Overlay } from '@/components/Overlay'
 import { useTranslation } from '@/lib/i18n'
@@ -11,9 +19,11 @@ import { useTranslation } from '@/lib/i18n'
 export function SettingsPanel() {
   const { t, lang } = useTranslation()
   const setLang = useSettingsStore((state) => state.setLang)
+  const upToDateText = useMemo(() => t('upToDate'), [t])
 
   const settings = useSettingsStore((state) => state.settings)
-  const modelsCache = useSettingsStore((state) => state.modelsCache)
+  const pushToast = useUIStore((state) => state.pushToast)
+  const modelsCacheByConnection = useSettingsStore((state) => state.modelsCacheByConnection)
   const isFetchingModels = useSettingsStore((state) => state.isFetchingModels)
   const setSettings = useSettingsStore((state) => state.setSettings)
   const setSettingsPanelOpen = useSettingsStore((state) => state.setSettingsPanelOpen)
@@ -39,7 +49,10 @@ export function SettingsPanel() {
 
   useEffect(() => {
     if (isSettingsPanelOpen) {
-      setLocalSettings(settings)
+      setLocalSettings(syncSettingsWithActiveConnection({
+        ...settings,
+        apiConnections: normalizeApiConnections(settings.apiConnections),
+      }))
       window.api.updater.getCurrentVersion().then(setCurrentVersion)
     }
   }, [isSettingsPanelOpen, settings])
@@ -56,7 +69,7 @@ export function SettingsPanel() {
     const unsubscribeNotAvailable = window.api.updater.onNotAvailable(() => {
       setIsCheckingUpdate(false)
       setUpdateInfo(null)
-      alert('当前已是最新版本')
+      pushToast(upToDateText, 'info')
     })
     const unsubscribeProgress = window.api.updater.onProgress((progress: DownloadProgress) => {
       setDownloadProgress(progress)
@@ -78,20 +91,37 @@ export function SettingsPanel() {
       unsubscribeDownloaded()
       unsubscribeError()
     }
-  }, [])
+  }, [pushToast, upToDateText])
 
-  const normalizedEndpoint = localSettings.apiEndpoint.replace(/\/+$/, '')
-  const cachedEndpoint = modelsCache?.endpoint?.replace(/\/+$/, '')
-  const availableModels = cachedEndpoint === normalizedEndpoint && modelsCache
-    ? modelsCache.models
+  const localConnections = normalizeApiConnections(localSettings.apiConnections)
+  const activeConnection = getActiveApiConnection({
+    apiConnections: localConnections,
+    activeConnectionId: localSettings.activeConnectionId,
+  })
+  const activeConnectionCache = modelsCacheByConnection[activeConnection.id]
+  const normalizedEndpoint = activeConnection.apiEndpoint.replace(/\/+$/, '')
+  const cachedEndpoint = activeConnectionCache?.endpoint?.replace(/\/+$/, '')
+  const availableModels = cachedEndpoint === normalizedEndpoint && activeConnectionCache
+    ? activeConnectionCache.models
     : []
+  const isActiveConnectionReady = Boolean(activeConnection.apiEndpoint && activeConnection.apiKey)
 
-  const filteredModels = modelSearch
-    ? availableModels.filter(m =>
-        m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
-        (m.name && m.name.toLowerCase().includes(modelSearch.toLowerCase()))
-      )
-    : availableModels
+  const filteredModels = useMemo(() =>
+    modelSearch
+      ? availableModels.filter(m =>
+          m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
+          (m.name && m.name.toLowerCase().includes(modelSearch.toLowerCase()))
+        )
+      : availableModels,
+    [availableModels, modelSearch]
+  )
+
+  const getConnectionLabel = (name: string, index: number): string => {
+    const fallback = t('connectionDefaultName').replace('{{index}}', String(index + 1))
+    if (!name.trim()) return fallback
+    if (/^Connection\s+\d+$/i.test(name.trim())) return fallback
+    return name.trim()
+  }
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -103,18 +133,41 @@ export function SettingsPanel() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  const patchConnection = (connectionId: ApiConnectionId, patch: Partial<(typeof localConnections)[number]>) => {
+    const nextConnections = localConnections.map((conn) =>
+      conn.id === connectionId ? { ...conn, ...patch } : conn
+    )
+
+    setLocalSettings(syncSettingsWithActiveConnection({
+      ...localSettings,
+      apiConnections: nextConnections,
+      activeConnectionId: localSettings.activeConnectionId,
+    }))
+  }
+
+  const switchActiveConnection = (connectionId: ApiConnectionId) => {
+    setFetchError(null)
+    setShowModelDropdown(false)
+    setModelSearch('')
+    setLocalSettings(syncSettingsWithActiveConnection({
+      ...localSettings,
+      apiConnections: localConnections,
+      activeConnectionId: connectionId,
+    }))
+  }
+
   const handleFetchModels = async () => {
-    if (!localSettings.apiEndpoint || !localSettings.apiKey) {
-      setFetchError('请先填写 API Endpoint 和 API Key')
+    if (!activeConnection.apiEndpoint || !activeConnection.apiKey) {
+      setFetchError(t('fillApiFirst'))
       return
     }
     setFetchError(null)
     setIsFetchingModels(true)
-    const result = await fetchModels(localSettings.apiEndpoint, localSettings.apiKey)
+    const result = await fetchModels(activeConnection.apiEndpoint, activeConnection.apiKey)
     setIsFetchingModels(false)
     if (result.success) {
-      const cleanEndpoint = localSettings.apiEndpoint.replace(/\/+$/, '')
-      setModelsCache({ endpoint: cleanEndpoint, models: result.models, fetchedAt: Date.now() })
+      const cleanEndpoint = activeConnection.apiEndpoint.replace(/\/+$/, '')
+      setModelsCache(activeConnection.id, { endpoint: cleanEndpoint, models: result.models, fetchedAt: Date.now() })
       setUseManualInput(false)
     } else {
       setFetchError(result.error)
@@ -123,7 +176,7 @@ export function SettingsPanel() {
   }
 
   const handleSelectModel = (model: ModelInfo) => {
-    setLocalSettings({ ...localSettings, modelName: model.id })
+    patchConnection(activeConnection.id, { modelName: model.id })
     setShowModelDropdown(false)
     setModelSearch('')
   }
@@ -161,7 +214,13 @@ export function SettingsPanel() {
   if (!isSettingsPanelOpen) return null
 
   const handleClose = () => setSettingsPanelOpen(false)
-  const handleSave = async () => { await setSettings(localSettings) }
+  const handleSave = async () => {
+    await setSettings(syncSettingsWithActiveConnection({
+      ...localSettings,
+      apiConnections: localConnections,
+      activeConnectionId: localSettings.activeConnectionId,
+    }))
+  }
   const handleReset = () => setLocalSettings(DEFAULT_SETTINGS)
 
   const inputBase = "w-full bg-transparent border-b py-1 text-sm outline-none transition-colors placeholder:opacity-40"
@@ -207,9 +266,62 @@ export function SettingsPanel() {
             </div>
           </section>
 
-          {/* ── API 配置 ── */}
-          <section className="space-y-4">
-            {/* API Endpoint + 指示灯 */}
+          {/* ── API 连接池（最多 3 组） ── */}
+          <section className="space-y-5">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest block" style={{ color: T.textMuted }}>
+                {t('apiConnections')}
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {localConnections.map((conn, idx) => {
+                  const isActive = conn.id === localSettings.activeConnectionId
+                  const isReady = Boolean(conn.apiEndpoint && conn.apiKey)
+                  return (
+                    <button
+                      key={conn.id}
+                      type="button"
+                      onClick={() => switchActiveConnection(conn.id)}
+                      className="border rounded-sm px-2 py-2 text-left transition-all"
+                      style={{
+                        borderColor: isActive ? T.accent : T.border,
+                        backgroundColor: isActive ? 'rgba(71,92,77,0.08)' : 'rgba(43,42,39,0.02)',
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider truncate" style={{ color: T.textPrimary }}>
+                          {getConnectionLabel(conn.name, idx)}
+                        </span>
+                        <span
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{
+                            backgroundColor: isReady ? T.statusGreen : T.textMuted,
+                            boxShadow: isReady ? `0 0 4px ${T.statusGreen}4d` : 'none',
+                          }}
+                        />
+                      </div>
+                      <p className="text-[9px] mt-1 truncate" style={{ color: T.textMuted, opacity: 0.8 }}>
+                        {conn.modelName || t('modelUnconfigured')}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-0.5">
+              <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                {t('connectionName')}
+              </label>
+              <input
+                type="text"
+                value={activeConnection.name}
+                onChange={(e) => patchConnection(activeConnection.id, { name: e.target.value })}
+                placeholder={t('connectionNamePlaceholder')}
+                className={inputBase}
+                style={{ borderColor: T.border, color: T.textPrimary }}
+              />
+            </div>
+
             <div className="space-y-0.5">
               <div className="flex items-center justify-between">
                 <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
@@ -217,33 +329,22 @@ export function SettingsPanel() {
                 </label>
                 <div
                   className="w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: T.statusGreen, boxShadow: `0 0 4px ${T.statusGreen}4d` }}
+                  style={{
+                    backgroundColor: isActiveConnectionReady ? T.statusGreen : T.textMuted,
+                    boxShadow: isActiveConnectionReady ? `0 0 4px ${T.statusGreen}4d` : 'none',
+                  }}
                 />
               </div>
               <input
                 type="text"
-                value={localSettings.apiEndpoint}
-                onChange={(e) => setLocalSettings({ ...localSettings, apiEndpoint: e.target.value })}
+                value={activeConnection.apiEndpoint}
+                onChange={(e) => patchConnection(activeConnection.id, { apiEndpoint: e.target.value })}
                 placeholder={DEFAULT_SETTINGS.apiEndpoint}
                 className={inputBase}
                 style={{ borderColor: T.border, color: T.textPrimary }}
               />
             </div>
 
-            {/* Organization ID */}
-            <div className="space-y-0.5">
-              <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                {t('orgId')}
-              </label>
-              <input
-                type="text"
-                placeholder="org-..."
-                className={inputBase}
-                style={{ borderColor: T.border, color: T.textPrimary }}
-              />
-            </div>
-
-            {/* API Key */}
             <div className="space-y-0.5">
               <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
                 {t('apiKey')}
@@ -251,8 +352,8 @@ export function SettingsPanel() {
               <div className="relative">
                 <input
                   type={showApiKey ? 'text' : 'password'}
-                  value={localSettings.apiKey}
-                  onChange={(e) => setLocalSettings({ ...localSettings, apiKey: e.target.value })}
+                  value={activeConnection.apiKey}
+                  onChange={(e) => patchConnection(activeConnection.id, { apiKey: e.target.value })}
                   placeholder="sk-..."
                   className={`${inputBase} pr-12 font-mono`}
                   style={{ borderColor: T.border, color: T.textPrimary }}
@@ -268,7 +369,6 @@ export function SettingsPanel() {
               </div>
             </div>
 
-            {/* 模型选择 */}
             <div className="space-y-1.5 pt-1">
               <div className="flex items-center justify-between">
                 <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
@@ -278,7 +378,7 @@ export function SettingsPanel() {
                   <button
                     type="button"
                     onClick={handleFetchModels}
-                    disabled={isFetchingModels || !localSettings.apiEndpoint || !localSettings.apiKey}
+                    disabled={isFetchingModels || !activeConnection.apiEndpoint || !activeConnection.apiKey}
                     className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
                     style={{ color: T.textMuted }}
                     onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
@@ -303,8 +403,8 @@ export function SettingsPanel() {
               {useManualInput || availableModels.length === 0 ? (
                 <input
                   type="text"
-                  value={localSettings.modelName}
-                  onChange={(e) => setLocalSettings({ ...localSettings, modelName: e.target.value })}
+                  value={activeConnection.modelName}
+                  onChange={(e) => patchConnection(activeConnection.id, { modelName: e.target.value })}
                   placeholder={DEFAULT_SETTINGS.modelName}
                   className={inputBase}
                   style={{ borderColor: T.border, color: T.textPrimary }}
@@ -321,8 +421,8 @@ export function SettingsPanel() {
                       color: T.textPrimary,
                     }}
                   >
-                    <span style={{ color: localSettings.modelName ? T.textPrimary : T.textMuted }}>
-                      {localSettings.modelName || t('selectModel')}
+                    <span style={{ color: activeConnection.modelName ? T.textPrimary : T.textMuted }}>
+                      {activeConnection.modelName || t('selectModel')}
                     </span>
                     <ChevronDown
                       size={13}
@@ -343,7 +443,7 @@ export function SettingsPanel() {
                             type="text"
                             value={modelSearch}
                             onChange={(e) => setModelSearch(e.target.value)}
-                            placeholder="搜索模型..."
+                            placeholder={t('searchModel')}
                             className="w-full pl-7 pr-3 py-1 text-xs rounded-sm"
                             style={{ backgroundColor: T.sidebarBg, color: T.textPrimary }}
                             autoFocus
@@ -353,7 +453,7 @@ export function SettingsPanel() {
                       <div className="overflow-y-auto max-h-44">
                         {filteredModels.length === 0 ? (
                           <div className="px-3 py-4 text-center text-xs" style={{ color: T.textMuted }}>
-                            {modelSearch ? '没有匹配的模型' : '暂无模型，请点击"获取模型"'}
+                            {modelSearch ? t('modelNotFound') : t('noModelsFetched')}
                           </div>
                         ) : (
                           filteredModels.map((model) => (
@@ -363,15 +463,15 @@ export function SettingsPanel() {
                               onClick={() => handleSelectModel(model)}
                               className="w-full px-3 py-2 text-left transition-colors"
                               style={{
-                                backgroundColor: localSettings.modelName === model.id ? T.hoverBg : 'transparent',
+                                backgroundColor: activeConnection.modelName === model.id ? T.hoverBg : 'transparent',
                               }}
-                              onMouseEnter={(e) => { if (localSettings.modelName !== model.id) e.currentTarget.style.backgroundColor = T.hoverBg }}
-                              onMouseLeave={(e) => { if (localSettings.modelName !== model.id) e.currentTarget.style.backgroundColor = 'transparent' }}
+                              onMouseEnter={(e) => { if (activeConnection.modelName !== model.id) e.currentTarget.style.backgroundColor = T.hoverBg }}
+                              onMouseLeave={(e) => { if (activeConnection.modelName !== model.id) e.currentTarget.style.backgroundColor = 'transparent' }}
                             >
                               <div className="text-xs" style={{ color: T.textPrimary }}>{model.id}</div>
                               {model.contextLength && (
                                 <div className="text-[10px]" style={{ color: T.textMuted }}>
-                                  上下文: {(model.contextLength / 1000).toFixed(0)}K
+                                  {t('contextLength')}: {(model.contextLength / 1000).toFixed(0)}K
                                 </div>
                               )}
                             </button>
@@ -388,7 +488,7 @@ export function SettingsPanel() {
               )}
               {availableModels.length > 0 && !useManualInput && (
                 <p className="text-[10px]" style={{ color: T.textMuted, opacity: 0.7 }}>
-                  已缓存 {availableModels.length} 个模型
+                  {t('cachedModels').replace('{{count}}', String(availableModels.length))}
                 </p>
               )}
             </div>

@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
-console.log('Preload script running...')
+const DEV_LOG = Boolean(process.env.VITE_DEV_SERVER_URL)
+if (DEV_LOG) {
+  console.log('Preload script running...')
+}
 
 const api = {
   settings: {
@@ -9,7 +12,9 @@ const api = {
   },
   file: {
     selectDirectory: () => {
-      console.log('selectDirectory called')
+      if (DEV_LOG) {
+        console.log('selectDirectory called')
+      }
       return ipcRenderer.invoke('file:selectDirectory')
     },
     read: (filePath) => ipcRenderer.invoke('file:read', filePath),
@@ -28,7 +33,7 @@ const api = {
   // 更新相关
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
-    download: () => ipcRenderer.invoke('updater:download'),
+    download: (downloadUrl) => ipcRenderer.invoke('updater:download', downloadUrl),
     install: () => ipcRenderer.invoke('updater:install'),
     getCurrentVersion: () => ipcRenderer.invoke('updater:current-version'),
     onChecking: (callback) => {
@@ -36,24 +41,27 @@ const api = {
       return () => ipcRenderer.removeListener('updater:checking', callback)
     },
     onAvailable: (callback) => {
-      ipcRenderer.on('updater:available', (_event, info) => callback(info))
-      return () => ipcRenderer.removeListener('updater:available', callback)
+      const handler = (_event, info) => callback(info)
+      ipcRenderer.on('updater:available', handler)
+      return () => ipcRenderer.removeListener('updater:available', handler)
     },
     onNotAvailable: (callback) => {
       ipcRenderer.on('updater:not-available', callback)
       return () => ipcRenderer.removeListener('updater:not-available', callback)
     },
     onProgress: (callback) => {
-      ipcRenderer.on('updater:progress', (_event, progress) => callback(progress))
-      return () => ipcRenderer.removeListener('updater:progress', callback)
+      const handler = (_event, progress) => callback(progress)
+      ipcRenderer.on('updater:progress', handler)
+      return () => ipcRenderer.removeListener('updater:progress', handler)
     },
     onDownloaded: (callback) => {
       ipcRenderer.on('updater:downloaded', callback)
       return () => ipcRenderer.removeListener('updater:downloaded', callback)
     },
     onError: (callback) => {
-      ipcRenderer.on('updater:error', (_event, error) => callback(error))
-      return () => ipcRenderer.removeListener('updater:error', callback)
+      const handler = (_event, error) => callback(error)
+      ipcRenderer.on('updater:error', handler)
+      return () => ipcRenderer.removeListener('updater:error', handler)
     },
   },
   // API 请求（绕过 CORS）
@@ -100,4 +108,6 @@ const api = {
 }
 
 contextBridge.exposeInMainWorld('api', api)
-console.log('API exposed to main world')
+if (DEV_LOG) {
+  console.log('API exposed to main world')
+}

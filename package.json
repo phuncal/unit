@@ -1,13 +1,15 @@
 {
   "name": "unit",
   "private": true,
-  "version": "1.3.1",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:electron": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
-    "build": "tsc && vite build && electron-builder",
-    "build:mac": "tsc && vite build && electron-builder --mac --universal",
+    "dev:electron": "tsc && vite build && cross-env UNIT_USE_DEV_SERVER=0 VITE_DEV_SERVER_URL= electron .",
+    "dev:electron:hot": "concurrently --kill-others-on-fail \"vite\" \"wait-on http://localhost:5173 && cross-env UNIT_USE_DEV_SERVER=1 VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "clean:appledouble": "find . -name '._*' -type f ! -path './.git/*' -exec rm -f {} +",
+    "build": "npm run clean:appledouble && tsc && vite build && npm run clean:appledouble && electron-builder",
+    "build:mac": "npm run clean:appledouble && tsc && vite build && npm run clean:appledouble && electron-builder --mac --universal",
     "build:signed": "./scripts/build-signed.sh",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
@@ -53,6 +55,7 @@
     "directories": {
       "output": "release"
     },
+    "asar": false,
     "mac": {
       "icon": "resources/icon.icns",
       "category": "public.app-category.productivity",
@@ -84,7 +87,9 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "resources/icon.png"
+      "resources/icon.png",
+      "!**/._*",
+      "!**/.DS_Store"
     ],
     "publish": {
       "provider": "github",

@@ -15,14 +15,17 @@ function ControlIcon({
   icon,
   onClick,
   active = false,
+  title,
 }: {
   icon: React.ReactNode
   onClick: () => void
   active?: boolean
+  title?: string
 }) {
   return (
     <button
       onClick={onClick}
+      title={title}
       className={`p-3 rounded-sm flex items-center justify-center transition-all border ${active ? 'shadow-inner' : ''}`}
       style={{
         borderColor: active ? T.orange : 'transparent',
@@ -52,11 +55,15 @@ export function Sidebar() {
   const setShowNewDialog = setNewConversationDialogOpen
   const [newConversationName, setNewConversationName] = useState('')
   const [selectedDirectory, setSelectedDirectory] = useState<string | null>(null)
+  const [reuseRecentDirectory, setReuseRecentDirectory] = useState(true)
   const [showTemplateSelect, setShowTemplateSelect] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [showTemplateManager, setShowTemplateManager] = useState(false)
   const [showUsageStats, setShowUsageStats] = useState(false)
+  const recentProjectPath = currentConversation?.projectPath
+    || conversations.find((c) => c.projectPath)?.projectPath
+    || null
 
   // ---- 业务逻辑：启动时只加载数据，不自动选中对话（保持欢迎封面） ----
   useEffect(() => {
@@ -67,6 +74,14 @@ export function Sidebar() {
     }
     init()
   }, [])
+
+  useEffect(() => {
+    if (!showNewDialog) return
+    if (selectedDirectory) return
+    if (!reuseRecentDirectory) return
+    if (!recentProjectPath) return
+    setSelectedDirectory(recentProjectPath)
+  }, [showNewDialog, selectedDirectory, reuseRecentDirectory, recentProjectPath])
 
   const handleNewConversation = async () => {
     if (!newConversationName.trim()) return
@@ -85,7 +100,7 @@ export function Sidebar() {
       const path = await window.api.file.selectDirectory()
       if (path) setSelectedDirectory(path)
     } catch (e) {
-      console.error(e)
+      console.error('Failed to select directory:', e)
     }
   }
 
@@ -225,18 +240,22 @@ export function Sidebar() {
         <ControlIcon
           icon={<SettingsIcon size={18} />}
           onClick={() => setSettingsPanelOpen(true)}
+          title={t('settings')}
         />
         <ControlIcon
           icon={<History size={18} />}
           onClick={() => setShowUsageStats(true)}
+          title={t('stats')}
         />
         <ControlIcon
           icon={<LayoutGrid size={18} />}
           onClick={() => setShowTemplateManager(true)}
+          title={t('templates')}
         />
         <ControlIcon
           icon={<FileDown size={18} />}
           onClick={() => setArchivePanelOpen(true)}
+          title={t('openArchive')}
         />
       </div>
 
@@ -313,6 +332,33 @@ export function Sidebar() {
                 >
                   <FolderOpen size={16} /> {t('bindFolder')}
                 </button>
+
+                {recentProjectPath && (
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setReuseRecentDirectory((v) => !v)}
+                      className="text-[10px] font-bold uppercase tracking-widest transition-colors"
+                      style={{ color: reuseRecentDirectory ? T.accent : T.textMuted }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = reuseRecentDirectory ? T.accent : T.textMuted)}
+                    >
+                      {reuseRecentDirectory ? t('reuseRecentDirOn') : t('reuseRecentDirOff')}
+                    </button>
+                    {selectedDirectory && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDirectory(null)}
+                        className="text-[10px] font-bold uppercase tracking-widest transition-colors"
+                        style={{ color: T.textMuted }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = T.warning)}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+                      >
+                        {t('clearBoundDir')}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

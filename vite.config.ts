@@ -4,7 +4,6 @@ import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import react from '@vitejs/plugin-react'
 import fs from 'node:fs'
-import { execSync } from 'node:child_process'
 
 // 复制 CJS preload 的插件
 function copyPreloadPlugin() {

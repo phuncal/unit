@@ -1,6 +1,15 @@
 import { ipcRenderer, contextBridge } from 'electron'
 
-console.log('Preload script running...')
+const DEV_LOG = Boolean(process.env.VITE_DEV_SERVER_URL)
+if (DEV_LOG) {
+  console.log('Preload script running...')
+}
+
+type UpdaterInfo = Record<string, unknown>
+type UpdaterProgress = Record<string, unknown>
+type UpdaterError = { message?: string } | string
+type StreamStatus = { status: number; statusText: string; headers: Record<string, string> }
+type FetchStreamResult = { requestId: string }
 
 // 暴露给渲染进程的 API
 const api = {
@@ -13,7 +22,9 @@ const api = {
   // 文件操作
   file: {
     selectDirectory: () => {
-      console.log('selectDirectory called')
+      if (DEV_LOG) {
+        console.log('selectDirectory called')
+      }
       return ipcRenderer.invoke('file:selectDirectory')
     },
     read: (filePath: string) => ipcRenderer.invoke('file:read', filePath),
@@ -42,8 +53,8 @@ const api = {
       ipcRenderer.on('updater:checking', callback)
       return () => ipcRenderer.removeListener('updater:checking', callback)
     },
-    onAvailable: (callback: (info: any) => void) => {
-      const handler = (_event: any, info: any) => callback(info)
+    onAvailable: (callback: (info: UpdaterInfo) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, info: UpdaterInfo) => callback(info)
       ipcRenderer.on('updater:available', handler)
       return () => ipcRenderer.removeListener('updater:available', handler)
     },
@@ -51,8 +62,8 @@ const api = {
       ipcRenderer.on('updater:not-available', callback)
       return () => ipcRenderer.removeListener('updater:not-available', callback)
     },
-    onProgress: (callback: (progress: any) => void) => {
-      const handler = (_event: any, progress: any) => callback(progress)
+    onProgress: (callback: (progress: UpdaterProgress) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: UpdaterProgress) => callback(progress)
       ipcRenderer.on('updater:progress', handler)
       return () => ipcRenderer.removeListener('updater:progress', handler)
     },
@@ -60,8 +71,8 @@ const api = {
       ipcRenderer.on('updater:downloaded', callback)
       return () => ipcRenderer.removeListener('updater:downloaded', callback)
     },
-    onError: (callback: (error: any) => void) => {
-      const handler = (_event: any, error: any) => callback(error)
+    onError: (callback: (error: UpdaterError) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, error: UpdaterError) => callback(error)
       ipcRenderer.on('updater:error', handler)
       return () => ipcRenderer.removeListener('updater:error', handler)
     },
@@ -84,13 +95,13 @@ const api = {
       headers: Record<string, string>
       body?: string
     }, callbacks: {
-      onStatus: (status: { status: number; statusText: string; headers: Record<string, string> }) => void
+      onStatus: (status: StreamStatus) => void
       onData: (line: string) => void
       onEnd: () => void
       onError: (error: string) => void
     }) => {
       return new Promise((resolve, reject) => {
-        ipcRenderer.invoke('api:fetchStream', options).then((result: any) => {
+        ipcRenderer.invoke('api:fetchStream', options).then((result: FetchStreamResult) => {
           const { requestId } = result
 
           // 清理监听器的辅助函数
@@ -102,13 +113,13 @@ const api = {
           }
 
           // 监听事件
-          const statusHandler = (_: any, status: any) => callbacks.onStatus(status)
-          const dataHandler = (_: any, line: string) => callbacks.onData(line)
+          const statusHandler = (_event: Electron.IpcRendererEvent, status: StreamStatus) => callbacks.onStatus(status)
+          const dataHandler = (_event: Electron.IpcRendererEvent, line: string) => callbacks.onData(line)
           const endHandler = () => {
             cleanupListeners()
             callbacks.onEnd()
           }
-          const errorHandler = (_: any, error: string) => {
+          const errorHandler = (_event: Electron.IpcRendererEvent, error: string) => {
             cleanupListeners()
             callbacks.onError(error)
             reject(new Error(error))
@@ -127,4 +138,6 @@ const api = {
 }
 
 contextBridge.exposeInMainWorld('api', api)
-console.log('API exposed to main world')
+if (DEV_LOG) {
+  console.log('API exposed to main world')
+}

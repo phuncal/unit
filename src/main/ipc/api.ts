@@ -2,6 +2,19 @@ import { ipcMain } from 'electron'
 import https from 'node:https'
 import http from 'node:http'
 
+const DEV_LOG = process.env.NODE_ENV !== 'production'
+const REQUEST_TIMEOUT_MS = 90000
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 32,
+  keepAliveMsecs: 15000,
+})
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 32,
+  keepAliveMsecs: 15000,
+})
+
 // 在主进程中发起 API 请求（绕过 CORS）
 export function registerApiHandlers() {
   // 非流式请求
@@ -13,6 +26,16 @@ export function registerApiHandlers() {
   }) => {
     const { url, method, headers, body } = options
     const client = url.startsWith('https') ? https : http
+    const requestId = Date.now().toString()
+
+    if (DEV_LOG) {
+      console.log('[Main] API Request:', {
+        requestId,
+        url,
+        method,
+        hasAuthorization: !!headers.Authorization,
+      })
+    }
 
     // 添加必要的请求头
     const finalHeaders = {
@@ -23,6 +46,7 @@ export function registerApiHandlers() {
     return new Promise((resolve, reject) => {
       const req = client.request(url, {
         method,
+        agent: url.startsWith('https') ? httpsAgent : httpAgent,
         headers: finalHeaders,
       }, (res) => {
         let data = ''
@@ -30,6 +54,14 @@ export function registerApiHandlers() {
           data += chunk
         })
         res.on('end', () => {
+          if (DEV_LOG) {
+            console.log('[Main] API Response:', {
+              requestId,
+              status: res.statusCode,
+              statusText: res.statusMessage,
+              bodyLength: data.length,
+            })
+          }
           resolve({
             status: res.statusCode,
             statusText: res.statusMessage,
@@ -39,7 +71,18 @@ export function registerApiHandlers() {
         })
       })
 
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        const timeoutError = new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`)
+        if (DEV_LOG) {
+          console.error('[Main] API Request Timeout:', requestId, url)
+        }
+        req.destroy(timeoutError)
+      })
+
       req.on('error', (error) => {
+        if (DEV_LOG) {
+          console.error('[Main] API Request Error:', requestId, error.message)
+        }
         reject(error)
       })
 
@@ -61,13 +104,14 @@ export function registerApiHandlers() {
     const client = url.startsWith('https') ? https : http
     const requestId = Date.now().toString()
 
-    console.log('[Main] API Stream Request:', {
-      requestId,
-      url,
-      method,
-      hasAuthorization: !!headers.Authorization,
-      authPrefix: headers.Authorization ? headers.Authorization.substring(0, 15) + '...' : 'none',
-    })
+    if (DEV_LOG) {
+      console.log('[Main] API Stream Request:', {
+        requestId,
+        url,
+        method,
+        hasAuthorization: !!headers.Authorization,
+      })
+    }
 
     // 添加必要的请求头
     const finalHeaders = {
@@ -79,18 +123,28 @@ export function registerApiHandlers() {
     return new Promise((resolve) => {
       const req = client.request(url, {
         method,
+        agent: url.startsWith('https') ? httpsAgent : httpAgent,
         headers: finalHeaders,
       }, (res) => {
         // 收集错误响应体
         let errorBody = ''
         const isOk = res.statusCode && res.statusCode >= 200 && res.statusCode < 300
+        let streamEnded = false
 
-        console.log('[Main] API Stream Response:', {
-          requestId,
-          status: res.statusCode,
-          statusText: res.statusMessage,
-          isOk,
-        })
+        const endStreamOnce = () => {
+          if (streamEnded) return
+          streamEnded = true
+          event.sender.send(`api:stream:${requestId}:end`)
+        }
+
+        if (DEV_LOG) {
+          console.log('[Main] API Stream Response:', {
+            requestId,
+            status: res.statusCode,
+            statusText: res.statusMessage,
+            isOk,
+          })
+        }
 
         // 发送状态
         event.sender.send(`api:stream:${requestId}:status`, {
@@ -101,6 +155,7 @@ export function registerApiHandlers() {
 
         let buffer = ''
         res.on('data', (chunk) => {
+          if (streamEnded) return
           const text = chunk.toString()
           if (!isOk) {
             errorBody += text
@@ -110,20 +165,36 @@ export function registerApiHandlers() {
           buffer = lines.pop() || ''
 
           for (const line of lines) {
-            if (line.trim()) {
+            const trimmed = line.trim()
+            if (trimmed) {
               event.sender.send(`api:stream:${requestId}:data`, line)
+              // 某些 SSE 服务在 [DONE] 后保持连接，主动结束避免前端悬挂
+              if (trimmed === 'data: [DONE]' || trimmed === 'data:[DONE]' || trimmed === '[DONE]') {
+                endStreamOnce()
+                req.destroy()
+                return
+              }
             }
           }
         })
 
         res.on('end', () => {
+          if (streamEnded) return
           if (!isOk && errorBody) {
             event.sender.send(`api:stream:${requestId}:data`, errorBody)
           } else if (buffer.trim()) {
             event.sender.send(`api:stream:${requestId}:data`, buffer)
           }
-          event.sender.send(`api:stream:${requestId}:end`)
+          endStreamOnce()
         })
+      })
+
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        const timeoutError = new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`)
+        if (DEV_LOG) {
+          console.error('[Main] API Stream Timeout:', requestId, url)
+        }
+        req.destroy(timeoutError)
       })
 
       req.on('error', (error) => {

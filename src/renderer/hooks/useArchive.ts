@@ -3,13 +3,14 @@ import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
 import { sendNonStreamMessage } from '@/api/client'
 
-const ARCHIVE_UPDATE_PROMPT = `请分析上面的对话内容，提取出其中新增的、已明确确认的结论或要点。
+const ARCHIVE_UPDATE_PROMPT = `请从“最近对话”里提取可写入项目记忆（archive.md）的新增结论。
 
 要求：
+- 已有项目记忆仅用于去重，不能原样重复输出
 - 只提取已确认的结论，不要推论过程
 - 每条结论单独一行，以"- "开头
-- 自由格式，内容是什么写什么，不强制分类
-- 如果对话中没有值得记录的新增结论，只输出"无新增内容"，不要输出其他内容`
+- 自由格式，不强制分类
+- 如果没有新增结论，只输出"无新增内容"`
 
 export function useArchive() {
   const { currentConversation } = useConversationsStore()
@@ -21,18 +22,33 @@ export function useArchive() {
 
   const updateArchive = useCallback(async () => {
     if (!currentConversation || !currentConversation.projectPath) return
+    if (currentConversation.messages.length < 2) {
+      return { success: true, empty: true }
+    }
 
     setIsUpdating(true)
 
     try {
+      const archiveResult = await window.api.archive.read(currentConversation.projectPath)
+      const existingArchive = archiveResult.success && archiveResult.content
+        ? archiveResult.content.trim()
+        : ''
+
+      const systemPrompt = [
+        ARCHIVE_UPDATE_PROMPT,
+        '',
+        '以下是已有项目记忆（用于去重，不要重复输出）：',
+        existingArchive || '(空)',
+      ].join('\n')
+
       // 将分析指令作为最后一条 user 消息追加到对话末尾
-      // 不能作为 systemPrompt 传入——那样 AI 会把它理解为行为约束而非分析指令
+      // 这里 system prompt 负责定义规则，最后一条 user 负责触发执行
       const messagesWithPrompt = [
         ...currentConversation.messages,
         {
           id: 'archive-prompt',
           role: 'user' as const,
-          content: [{ type: 'text' as const, text: ARCHIVE_UPDATE_PROMPT }],
+          content: [{ type: 'text' as const, text: '请基于以上对话，输出可新增写入 archive.md 的结论。' }],
           pinned: false,
           createdAt: Date.now(),
         },
@@ -41,15 +57,16 @@ export function useArchive() {
       const result = await sendNonStreamMessage(
         settings,
         messagesWithPrompt,
-        undefined
+        systemPrompt
       )
 
-      if (result.trim() === '无新增内容') {
+      const normalized = result.trim().replace(/^```[\s\S]*?\n|```$/g, '').trim()
+      if (!normalized || normalized.includes('无新增内容')) {
         setIsUpdating(false)
         return { success: true, empty: true }
       }
 
-      setPreviewText(result)
+      setPreviewText(normalized)
       setShowPreview(true)
 
       setIsUpdating(false)

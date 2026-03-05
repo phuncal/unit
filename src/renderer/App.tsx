@@ -3,6 +3,7 @@ import { Chat } from '@/components/Chat'
 import { SettingsPanel } from '@/components/Settings'
 import { ArchivePanel } from '@/components/Archive'
 import { UpdateBanner } from '@/components/UpdateBanner'
+import { ToastStack } from '@/components/ToastStack'
 
 function App() {
   // API Key 的加密/解密现在由 settings store 的自定义 storage 自动处理
@@ -11,6 +12,7 @@ function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       <UpdateBanner />
+      <ToastStack />
       <Sidebar />
       <Chat />
       <SettingsPanel />

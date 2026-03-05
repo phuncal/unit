@@ -1,6 +1,7 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
+import { useUIStore } from '@/store/ui'
 import {
   sendChatMessage,
   isVisionModel,
@@ -12,6 +13,9 @@ import {
   MODEL_PRICING,
   REPLY_STYLE_PROMPTS,
 } from '@/types'
+import { conversationDB } from '@/db'
+
+const STREAM_TIMEOUT_MS = 120000
 
 export function useChat() {
   // 使用单独的 selector 确保正确订阅
@@ -23,8 +27,12 @@ export function useChat() {
   const updateConversationTokenCount = useConversationsStore((state) => state.updateConversationTokenCount)
   const isStreaming = useConversationsStore((state) => state.isStreaming)
   const streamingContent = useConversationsStore((state) => state.streamingContent)
+  const pushToast = useUIStore((state) => state.pushToast)
 
   const settings = useSettingsStore((state) => state.settings)
+
+  // 缓存最近一次构建的 system prompt，用于费用预估
+  const lastSystemPromptRef = useRef<string>('')
 
   // 计算滑动窗口后的消息
   const contextMessages = useMemo(() => {
@@ -34,7 +42,7 @@ export function useChat() {
     const windowSize = settings.slidingWindowSize
 
     return applySlidingWindow(allMessages, windowSize)
-  }, [currentConversation?.messages, settings.slidingWindowSize])
+  }, [currentConversation, settings.slidingWindowSize])
 
   // 计算上下文统计
   const contextStats = useMemo(() => {
@@ -81,7 +89,7 @@ export function useChat() {
     }
 
     return systemPrompt.trim() || undefined
-  }, [currentConversation?.id, currentConversation?.systemPrompt, currentConversation?.projectPath, currentConversation?.replyStyle, settings.replyStyle])
+  }, [currentConversation, settings.replyStyle])
 
   // 计算预估费用
   const costEstimate = useMemo(() => {
@@ -89,15 +97,13 @@ export function useChat() {
       return null
     }
 
-    // 这里我们用空字符串作为 system prompt 的简化估算
-    // 实际发送时会包含完整内容
     return estimateCost(
       contextMessages,
-      '',
+      lastSystemPromptRef.current,
       settings.modelName,
       MODEL_PRICING
     )
-  }, [contextMessages, settings.modelName])
+  }, [currentConversation, contextMessages, settings.modelName])
 
   const sendMessage = useCallback(async (content: ContentBlock[], overrideContextIds?: string[]) => {
     if (!currentConversation || isStreaming) return
@@ -143,9 +149,18 @@ export function useChat() {
 
       // 4. 构建包含档案的 system prompt
       const fullSystemPrompt = await buildSystemPrompt()
+      lastSystemPromptRef.current = fullSystemPrompt || ''
 
       // 5. 开始流式响应
       setStreaming(true, '')
+
+      let settled = false
+      const streamTimeout = window.setTimeout(() => {
+        if (settled) return
+        settled = true
+        clearStreamingContent()
+        pushToast('请求超时，请重试或切换模型。', 'error')
+      }, STREAM_TIMEOUT_MS)
 
       await sendChatMessage(
         settings,
@@ -153,9 +168,13 @@ export function useChat() {
         fullSystemPrompt,
         {
           onToken: (token) => {
+            if (settled) return
             appendStreamingContent(token)
           },
           onComplete: async (fullContent, usage) => {
+            if (settled) return
+            settled = true
+            window.clearTimeout(streamTimeout)
             const generationTime = Date.now() - startTime
 
             // 6. 立即清除流式状态，避免和新消息重叠
@@ -170,27 +189,48 @@ export function useChat() {
               cacheReadTokens: usage?.cacheReadTokens,
             })
 
-            // 8. 更新 token 计数和费用统计
+            // 8. 更新 token 计数
             await updateConversationTokenCount()
+
+            // 9. 写入累计费用统计
+            if (usage && currentConversation) {
+              const inputTokens = usage.promptTokens || 0
+              const outputTokens = usage.completionTokens || 0
+              const modelEntry = Object.entries(MODEL_PRICING).find(([name]) =>
+                settings.modelName.toLowerCase().includes(name.toLowerCase())
+              )
+              const cost = modelEntry
+                ? (inputTokens * modelEntry[1].input + outputTokens * modelEntry[1].output) / 1000
+                : 0
+              await conversationDB.updateUsageStats(currentConversation.id, inputTokens, outputTokens, cost)
+            }
           },
           onError: (error) => {
+            if (settled) return
+            settled = true
+            window.clearTimeout(streamTimeout)
             console.error('Chat error:', error)
             // 清除流式状态
             clearStreamingContent()
 
-            // 显示错误提示给用户
-            alert(`发送消息失败：${error.message}\n\n请检查：\n1. API Endpoint 是否正确\n2. API Key 是否有效\n3. 模型名称是否正确\n4. 网络连接是否正常\n\n详细信息请查看控制台日志。`)
+            pushToast(`发送失败：${error.message}`, 'error')
           },
         }
       )
+
+      if (!settled) {
+        settled = true
+        window.clearTimeout(streamTimeout)
+        clearStreamingContent()
+        pushToast('未收到模型响应，请重试。', 'error')
+      }
     } catch (error) {
       console.error('Failed to send message:', error)
       // 清除流式状态
       clearStreamingContent()
 
-      // 显示错误提示给用户
       const errorMessage = error instanceof Error ? error.message : String(error)
-      alert(`发送消息时发生错误：${errorMessage}\n\n请检查控制台日志获取详细信息。`)
+      pushToast(`发送失败：${errorMessage}`, 'error')
     }
   }, [
     currentConversation,
@@ -202,6 +242,7 @@ export function useChat() {
     clearStreamingContent,
     updateConversationTokenCount,
     buildSystemPrompt,
+    pushToast,
   ])
 
   const regenerateLastMessage = useCallback(async () => {

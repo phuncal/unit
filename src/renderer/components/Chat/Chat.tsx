@@ -1,21 +1,46 @@
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   Send, Upload, Download, ChevronDown,
   Trash2, RefreshCw, Plus, GitBranch, ListFilter,
-  Anchor,
+  Anchor, Cpu,
 } from 'lucide-react'
 import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
+import { useUIStore } from '@/store/ui'
 import { useChat } from '@/hooks/useChat'
 import { useExport } from '@/hooks/useExport'
+import { fetchModels } from '@/api/client'
 import { ChatSearch } from './ChatSearch'
 import { ContextSelector } from './ContextSelector'
 import { useArchiveMention, ArchiveMentionPicker } from './useArchiveMention'
 import { T } from '@/lib/tokens'
 import { useTranslation } from '@/lib/i18n'
-import type { Message, ContentBlock } from '@/types'
+import {
+  getActiveApiConnection,
+  normalizeApiConnections,
+  type ApiConnectionId,
+  type Message,
+  type ContentBlock,
+} from '@/types'
 import { ManualPanel } from '@/components/ManualPanel'
+
+interface PendingDocument {
+  id: string
+  name: string
+  content: string
+  originalLength: number
+  truncated: boolean
+}
+
+const MAX_PENDING_DOC_CHARS = 12000
+
+function countArchiveEntries(content: string): number {
+  return content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- ')).length
+}
 
 // 高亮搜索关键词
 function highlightText(text: string | undefined, keyword: string | undefined): React.ReactNode {
@@ -55,7 +80,6 @@ function MessageItem({
   isStreaming,
   streamingContent,
   highlightKeyword,
-  isHighlighted: _isHighlighted,
   onPin,
   onDelete,
   onBranch,
@@ -64,7 +88,6 @@ function MessageItem({
   isStreaming?: boolean
   streamingContent?: string
   highlightKeyword?: string
-  isHighlighted?: boolean
   onPin?: () => void
   onDelete?: () => void
   onBranch?: () => void
@@ -182,9 +205,22 @@ export function Chat() {
   const createBranch = useConversationsStore((state) => state.createBranch)
   const selectConversation = useConversationsStore((state) => state.selectConversation)
   const setNewConversationDialogOpen = useSettingsStore((state) => state.setNewConversationDialogOpen)
+  const settings = useSettingsStore((state) => state.settings)
+  const setSettings = useSettingsStore((state) => state.setSettings)
+  const modelsCacheByConnection = useSettingsStore((state) => state.modelsCacheByConnection)
+  const setModelsCache = useSettingsStore((state) => state.setModelsCache)
+  const isFetchingModels = useSettingsStore((state) => state.isFetchingModels)
+  const setIsFetchingModels = useSettingsStore((state) => state.setIsFetchingModels)
+  const pushToast = useUIStore((state) => state.pushToast)
   const { t } = useTranslation()
 
   const [archiveLoaded, setArchiveLoaded] = useState(false)
+  const [archiveEntryCount, setArchiveEntryCount] = useState(0)
+  const [showModelSwitcher, setShowModelSwitcher] = useState(false)
+  const [modelSearch, setModelSearch] = useState('')
+  const [quickModelInput, setQuickModelInput] = useState(settings.modelName)
+  const [quickManualInput, setQuickManualInput] = useState(false)
+  const [quickFetchError, setQuickFetchError] = useState<string | null>(null)
 
   // 说明书面板视图状态
   const [view, setView] = useState<string | null>(null)
@@ -203,8 +239,10 @@ export function Chat() {
   const { exportAsMarkdown, exportAsText, isExporting, listMdFiles, exportSelectedMdAsDesign, saveToFile } = useExport()
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<ContentBlock[]>([])
+  const [pendingDocs, setPendingDocs] = useState<PendingDocument[]>([])
 
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null)
+  const [highlightKeyword, setHighlightKeyword] = useState<string | undefined>(undefined)
   const [showContextSelector, setShowContextSelector] = useState(false)
   const [manualContextIds, setManualContextIds] = useState<string[] | null>(null)
 
@@ -223,9 +261,48 @@ export function Chat() {
 
   // 上一次 isStreaming 的值，用于检测流式完成
   const prevStreamingRef = useRef(false)
+  const shouldStickToBottomRef = useRef(true)
 
   const parentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const modelSwitcherRef = useRef<HTMLDivElement>(null)
+
+  const apiConnections = useMemo(
+    () => normalizeApiConnections(settings.apiConnections),
+    [settings.apiConnections]
+  )
+  const activeConnection = useMemo(
+    () => getActiveApiConnection({
+      apiConnections,
+      activeConnectionId: settings.activeConnectionId,
+    }),
+    [apiConnections, settings.activeConnectionId]
+  )
+  const activeModelsCache = modelsCacheByConnection[activeConnection.id]
+  const activeModels = useMemo(() => {
+    const endpoint = activeConnection.apiEndpoint.replace(/\/+$/, '')
+    if (!endpoint || !activeModelsCache) return []
+    const cachedEndpoint = activeModelsCache.endpoint.replace(/\/+$/, '')
+    return cachedEndpoint === endpoint ? activeModelsCache.models : []
+  }, [activeConnection.apiEndpoint, activeModelsCache])
+  const filteredQuickModels = useMemo(() => {
+    if (!modelSearch.trim()) return activeModels
+    const keyword = modelSearch.toLowerCase()
+    return activeModels.filter((model) =>
+      model.id.toLowerCase().includes(keyword) ||
+      (model.name && model.name.toLowerCase().includes(keyword))
+    )
+  }, [activeModels, modelSearch])
+
+  const getConnectionLabel = useCallback((name: string, index: number): string => {
+    const fallback = t('connectionDefaultName').replace('{{index}}', String(index + 1))
+    if (!name.trim()) return fallback
+    if (/^Connection\s+\d+$/i.test(name.trim())) return fallback
+    return name.trim()
+  }, [t])
+  const activeConnectionIndex = apiConnections.findIndex((conn) => conn.id === activeConnection.id)
+  const activeConnectionLabel = getConnectionLabel(activeConnection.name, activeConnectionIndex >= 0 ? activeConnectionIndex : 0)
+  const canEditInput = Boolean(currentConversation && activeConnection.apiEndpoint && activeConnection.apiKey)
 
   // @ 引用档案条目
   const { showPicker, pickerPosition, filteredEntries, selectedIndex, selectEntry } = useArchiveMention({
@@ -263,24 +340,92 @@ export function Chat() {
   // 检测当前对话是否有档案，用于显示系统提示
   useEffect(() => {
     setArchiveLoaded(false)
+    setArchiveEntryCount(0)
     if (!currentConversation?.projectPath) return
 
     window.api.archive.read(currentConversation.projectPath).then((result) => {
       if (result.success && result.content && result.content.trim()) {
         setArchiveLoaded(true)
+        setArchiveEntryCount(countArchiveEntries(result.content))
       }
     }).catch(() => {})
   }, [currentConversation?.id, currentConversation?.projectPath])
 
+  useEffect(() => {
+    setQuickModelInput(settings.modelName)
+  }, [settings.modelName, activeConnection.id])
+
+  useEffect(() => {
+    if (!showModelSwitcher) return
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!modelSwitcherRef.current) return
+      if (!modelSwitcherRef.current.contains(event.target as Node)) {
+        setShowModelSwitcher(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showModelSwitcher])
+
+  const handleQuickSwitchConnection = useCallback(async (connectionId: ApiConnectionId) => {
+    setQuickFetchError(null)
+    setQuickManualInput(false)
+    setModelSearch('')
+    await setSettings({ activeConnectionId: connectionId })
+  }, [setSettings])
+
+  const handleQuickApplyModel = useCallback(async (modelName: string) => {
+    const nextModel = modelName.trim()
+    if (!nextModel) return
+    setQuickFetchError(null)
+    await setSettings({ modelName: nextModel })
+  }, [setSettings])
+
+  const handleQuickFetchModels = useCallback(async () => {
+    if (!activeConnection.apiEndpoint || !activeConnection.apiKey) {
+      setQuickFetchError(t('fillApiFirst'))
+      return
+    }
+    setQuickFetchError(null)
+    setIsFetchingModels(true)
+    const result = await fetchModels(activeConnection.apiEndpoint, activeConnection.apiKey)
+    setIsFetchingModels(false)
+    if (result.success) {
+      const cleanEndpoint = activeConnection.apiEndpoint.replace(/\/+$/, '')
+      setModelsCache(activeConnection.id, {
+        endpoint: cleanEndpoint,
+        models: result.models,
+        fetchedAt: Date.now(),
+      })
+      setQuickManualInput(false)
+      pushToast(t('modelsUpdated'), 'success')
+    } else {
+      setQuickFetchError(result.error)
+      setQuickManualInput(true)
+    }
+  }, [
+    activeConnection.apiEndpoint,
+    activeConnection.apiKey,
+    activeConnection.id,
+    setIsFetchingModels,
+    setModelsCache,
+    pushToast,
+    t,
+  ])
+
   // 滚动到高亮消息
-  const handleHighlight = useCallback((messageId: string) => {
+  const handleHighlight = useCallback((messageId: string, keyword?: string) => {
     setHighlightMessageId(messageId)
+    setHighlightKeyword(keyword)
     const element = document.getElementById(`message-${messageId}`)
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
     // 3秒后取消高亮
-    setTimeout(() => setHighlightMessageId(null), 3000)
+    setTimeout(() => {
+      setHighlightMessageId(null)
+      setHighlightKeyword(undefined)
+    }, 3000)
   }, [])
 
   const messages = currentConversation?.messages || []
@@ -289,87 +434,156 @@ export function Chat() {
   const virtualizer = useVirtualizer({
     count: messages.length + (isStreaming ? 1 : 0),
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 150, // 估计每条消息的高度
+    estimateSize: () => 200, // 保守估算，减少滚动位置跳动
     overscan: 5, // 预渲染前后各5条
   })
 
-  // 自动滚动到底部
+  const updateStickToBottomState = useCallback(() => {
+    const scrollContainer = parentRef.current
+    if (!scrollContainer) return
+    const distanceToBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight
+    shouldStickToBottomRef.current = distanceToBottom < 120
+  }, [])
+
+  const scrollToBottom = useCallback((force = false) => {
+    const scrollContainer = parentRef.current
+    if (!scrollContainer) return
+    if (!force && !shouldStickToBottomRef.current) return
+    scrollContainer.scrollTo({
+      top: scrollContainer.scrollHeight,
+      behavior: 'auto',
+    })
+  }, [])
+
   useEffect(() => {
-    if (parentRef.current && messages.length > 0) {
-      // 滚动到最后一个元素
-      virtualizer.scrollToIndex(messages.length + (isStreaming ? 1 : 0) - 1, {
-        align: 'end',
-        behavior: 'smooth',
-      })
-    }
-  }, [messages.length, isStreaming, virtualizer])
+    const scrollContainer = parentRef.current
+    if (!scrollContainer) return
+    const handleScroll = () => updateStickToBottomState()
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true })
+    updateStickToBottomState()
+    return () => scrollContainer.removeEventListener('scroll', handleScroll)
+  }, [updateStickToBottomState])
+
+  // 新消息到达时：若用户在底部附近，自动贴底
+  useEffect(() => {
+    if (messages.length === 0) return
+    const frame = window.requestAnimationFrame(() => {
+      scrollToBottom()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [messages.length, isStreaming, scrollToBottom])
 
   // 流式内容更新时也滚动到底部
   useEffect(() => {
-    if (isStreaming && parentRef.current) {
-      parentRef.current.scrollTop = parentRef.current.scrollHeight
+    if (!isStreaming) return
+    scrollToBottom()
+  }, [isStreaming, streamingContent, scrollToBottom])
+
+  const isTextDocumentFile = useCallback((file: File) => {
+    const name = file.name.toLowerCase()
+    return (
+      file.type.startsWith('text/') ||
+      name.endsWith('.txt') ||
+      name.endsWith('.md') ||
+      name.endsWith('.markdown')
+    )
+  }, [])
+
+  const addImageToPending = useCallback((file: File) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const data = reader.result as string
+      const base64 = data.split(',')[1]
+      const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
+      setPendingImages((prev) => [
+        ...prev,
+        {
+          type: 'image',
+          image: { data: base64, mimeType },
+        },
+      ])
     }
-  }, [isStreaming, streamingContent])
+    reader.readAsDataURL(file)
+  }, [])
 
-  const handleSend = async () => {
-    if (!input.trim() && pendingImages.length === 0) return
-    if (!canSend) return
+  const addDocumentToPending = useCallback(async (file: File) => {
+    try {
+      const text = await file.text()
+      if (!text.trim()) return
+      const originalLength = text.length
+      const truncated = originalLength > MAX_PENDING_DOC_CHARS
+      const trimmedContent = truncated
+        ? `${text.slice(0, MAX_PENDING_DOC_CHARS)}\n\n[文档已截断，原始长度 ${originalLength} 字]`
+        : text
 
-    const content: ContentBlock[] = [
-      ...pendingImages,
-    ]
+      setPendingDocs((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          name: file.name,
+          content: trimmedContent,
+          originalLength,
+          truncated,
+        },
+      ])
+    } catch (error) {
+      console.error('Failed to read file:', error)
+    }
+  }, [])
 
+  const buildPendingContent = useCallback((): ContentBlock[] => {
+    const content: ContentBlock[] = [...pendingImages]
+    if (pendingDocs.length > 0) {
+      const docsText = pendingDocs
+        .map((doc) => `【文档：${doc.name}】\n${doc.content}`)
+        .join('\n\n')
+      content.push({ type: 'text', text: docsText })
+    }
     if (input.trim()) {
       content.push({ type: 'text', text: input.trim() })
     }
+    return content
+  }, [pendingImages, pendingDocs, input])
 
-    await sendMessage(content, manualContextIds ?? undefined)
+  const clearPendingInputs = useCallback(() => {
     setInput('')
     setPendingImages([])
+    setPendingDocs([])
     setManualContextIds(null)
+  }, [])
+
+  const handleSend = async () => {
+    if (!input.trim() && pendingImages.length === 0 && pendingDocs.length === 0) return
+    if (!canSend) return
+    const content = buildPendingContent()
+    await sendMessage(content, manualContextIds ?? undefined)
+    clearPendingInputs()
   }
 
   const handleContextSelectorConfirm = async (selectedIds: string[]) => {
     setManualContextIds(selectedIds)
     setShowContextSelector(false)
-    // 直接触发发送，此时 manualContextIds 会在下一次渲染生效
-    // 用 ref 存储以确保立即可用
-    if (!input.trim() && pendingImages.length === 0) return
+    if (!input.trim() && pendingImages.length === 0 && pendingDocs.length === 0) return
     if (!canSend) return
-
-    const content: ContentBlock[] = [...pendingImages]
-    if (input.trim()) {
-      content.push({ type: 'text', text: input.trim() })
-    }
-
+    const content = buildPendingContent()
     await sendMessage(content, selectedIds)
-    setInput('')
-    setPendingImages([])
-    setManualContextIds(null)
+    clearPendingInputs()
   }
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
 
     for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/')) continue
-
-      const reader = new FileReader()
-      reader.onload = () => {
-        const data = reader.result as string
-        const base64 = data.split(',')[1]
-        const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
-
-        setPendingImages((prev) => [
-          ...prev,
-          {
-            type: 'image',
-            image: { data: base64, mimeType },
-          },
-        ])
+      if (file.type.startsWith('image/')) {
+        addImageToPending(file)
+        continue
       }
-      reader.readAsDataURL(file)
+
+      if (isTextDocumentFile(file)) {
+        await addDocumentToPending(file)
+      }
     }
 
     e.target.value = ''
@@ -377,6 +591,10 @@ export function Chat() {
 
   const handleRemovePendingImage = (index: number) => {
     setPendingImages((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleRemovePendingDoc = (id: string) => {
+    setPendingDocs((prev) => prev.filter((doc) => doc.id !== id))
   }
 
   // 拖放文件处理
@@ -403,39 +621,16 @@ export function Chat() {
     if (files.length === 0) return
 
     for (const file of files) {
-      // 图片文件
       if (file.type.startsWith('image/')) {
-        const reader = new FileReader()
-        reader.onload = () => {
-          const data = reader.result as string
-          const base64 = data.split(',')[1]
-          const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
-          setPendingImages((prev) => [
-            ...prev,
-            {
-              type: 'image',
-              image: { data: base64, mimeType },
-            },
-          ])
-        }
-        reader.readAsDataURL(file)
+        addImageToPending(file)
         continue
       }
 
-      // 文本文件 (.txt, .md)
-      if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
-        try {
-          const text = await file.text()
-          setInput((prev) => {
-            const separator = prev.trim() ? '\n\n' : ''
-            return prev + separator + `【文件：${file.name}】\n${text}`
-          })
-        } catch (error) {
-          console.error('Failed to read file:', error)
-        }
+      if (isTextDocumentFile(file)) {
+        await addDocumentToPending(file)
       }
     }
-  }, [])
+  }, [addDocumentToPending, addImageToPending, isTextDocumentFile])
 
   // ============================================================
   // 欢迎界面 — 打字机 Logo + 说明书入口
@@ -545,6 +740,13 @@ export function Chat() {
           >
             {currentConversation.name}
           </span>
+          <span
+            className="text-[10px] font-mono truncate max-w-[260px]"
+            style={{ color: T.textMuted, opacity: 0.75 }}
+            title={`${activeConnectionLabel} · ${settings.modelName}`}
+          >
+            {activeConnectionLabel} · {settings.modelName || t('modelUnconfigured')}
+          </span>
           {/* 上下文统计 */}
           {contextStats && (
             <span className="text-[10px] font-mono" style={{ color: T.textMuted, opacity: 0.6 }}>
@@ -571,6 +773,182 @@ export function Chat() {
           className="flex items-center gap-6"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
+          <div className="relative" ref={modelSwitcherRef}>
+            <button
+              type="button"
+              onClick={() => setShowModelSwitcher((prev) => !prev)}
+              className="flex items-center gap-2 border rounded-sm px-2 py-1 transition-colors"
+              style={{ borderColor: T.border, color: T.textMuted, backgroundColor: 'rgba(43,42,39,0.02)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = T.textPrimary)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+              title={t('modelSwitcher')}
+            >
+              <Cpu size={14} strokeWidth={1.5} />
+              <span className="text-[10px] font-bold uppercase tracking-wider max-w-[150px] truncate">
+                {activeConnectionLabel} · {settings.modelName || t('modelUnconfigured')}
+              </span>
+              <ChevronDown size={12} strokeWidth={1.5} className={showModelSwitcher ? 'rotate-180 transition-transform' : 'transition-transform'} />
+            </button>
+
+            {showModelSwitcher && (
+              <div
+                className="absolute right-0 top-full mt-2 z-50 w-[320px] border rounded-sm p-3 space-y-3 shadow-xl"
+                style={{
+                  backgroundColor: T.mainBg,
+                  borderColor: T.border,
+                  boxShadow: '0 8px 30px rgba(43,42,39,0.08)',
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                    {t('modelSwitcher')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setQuickManualInput((prev) => !prev)}
+                    className="text-[10px] font-bold uppercase tracking-widest transition-colors"
+                    style={{ color: T.textMuted }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+                  >
+                    {quickManualInput ? t('selectModel') : t('manualInput')}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  {apiConnections.map((conn, index) => {
+                    const isActive = conn.id === activeConnection.id
+                    const isReady = Boolean(conn.apiEndpoint && conn.apiKey)
+                    return (
+                      <button
+                        key={conn.id}
+                        type="button"
+                        onClick={() => handleQuickSwitchConnection(conn.id)}
+                        className="border rounded-sm p-2 text-left transition-colors"
+                        style={{
+                          borderColor: isActive ? T.accent : T.border,
+                          backgroundColor: isActive ? 'rgba(71,92,77,0.08)' : 'transparent',
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-[9px] font-bold uppercase tracking-wider truncate" style={{ color: T.textPrimary }}>
+                            {getConnectionLabel(conn.name, index)}
+                          </span>
+                          <span
+                            className="w-1.5 h-1.5 rounded-full shrink-0"
+                            style={{
+                              backgroundColor: isReady ? T.statusGreen : T.textMuted,
+                              boxShadow: isReady ? `0 0 4px ${T.statusGreen}4d` : 'none',
+                            }}
+                          />
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={handleQuickFetchModels}
+                    disabled={isFetchingModels || !activeConnection.apiEndpoint || !activeConnection.apiKey}
+                    className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                    style={{ color: T.textMuted }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+                  >
+                    <RefreshCw size={10} className={isFetchingModels ? 'animate-spin' : ''} />
+                    {isFetchingModels ? t('checking') : t('fetchModels')}
+                  </button>
+                  <span className="text-[10px]" style={{ color: T.textMuted, opacity: 0.75 }}>
+                    {activeModels.length > 0
+                      ? t('cachedModels').replace('{{count}}', String(activeModels.length))
+                      : t('noModelsFetched')}
+                  </span>
+                </div>
+
+                {quickManualInput || activeModels.length === 0 ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={quickModelInput}
+                      onChange={(e) => setQuickModelInput(e.target.value)}
+                      onKeyDown={async (e) => {
+                        if (e.key !== 'Enter') return
+                        await handleQuickApplyModel(quickModelInput)
+                        setShowModelSwitcher(false)
+                      }}
+                      placeholder={t('modelName')}
+                      className="flex-1 bg-transparent border-b py-1 text-xs outline-none"
+                      style={{ borderColor: T.border, color: T.textPrimary }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await handleQuickApplyModel(quickModelInput)
+                        setShowModelSwitcher(false)
+                      }}
+                      className="text-[10px] font-bold uppercase tracking-wider transition-colors"
+                      style={{ color: T.accent }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = T.accent)}
+                    >
+                      {t('applyModel')}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="border rounded-sm overflow-hidden" style={{ borderColor: T.border }}>
+                    <div className="p-2 border-b" style={{ borderColor: T.border }}>
+                      <input
+                        type="text"
+                        value={modelSearch}
+                        onChange={(e) => setModelSearch(e.target.value)}
+                        placeholder={t('searchModel')}
+                        className="w-full bg-transparent text-xs outline-none"
+                        style={{ color: T.textPrimary }}
+                      />
+                    </div>
+                    <div className="max-h-44 overflow-y-auto">
+                      {filteredQuickModels.length === 0 ? (
+                        <div className="px-3 py-3 text-center text-xs" style={{ color: T.textMuted }}>
+                          {modelSearch ? t('modelNotFound') : t('noModelsFetched')}
+                        </div>
+                      ) : (
+                        filteredQuickModels.map((model) => (
+                          <button
+                            key={model.id}
+                            type="button"
+                            onClick={async () => {
+                              await handleQuickApplyModel(model.id)
+                              setShowModelSwitcher(false)
+                            }}
+                            className="w-full px-3 py-2 text-left transition-colors"
+                            style={{ backgroundColor: settings.modelName === model.id ? T.hoverBg : 'transparent' }}
+                            onMouseEnter={(e) => { if (settings.modelName !== model.id) e.currentTarget.style.backgroundColor = T.hoverBg }}
+                            onMouseLeave={(e) => { if (settings.modelName !== model.id) e.currentTarget.style.backgroundColor = 'transparent' }}
+                          >
+                            <div className="text-xs" style={{ color: T.textPrimary }}>{model.id}</div>
+                            {model.contextLength && (
+                              <div className="text-[10px]" style={{ color: T.textMuted }}>
+                                {t('contextLength')}: {(model.contextLength / 1000).toFixed(0)}K
+                              </div>
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {quickFetchError && (
+                  <p className="text-[11px]" style={{ color: T.warning }}>
+                    {quickFetchError}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* 搜索 */}
           {messages.length > 0 && (
             <ChatSearch onHighlight={handleHighlight} />
@@ -601,9 +979,30 @@ export function Chat() {
                 }}
               >
                 {[
-                  { label: t('exportMarkdown'), action: async () => { const r = await exportAsMarkdown(); if (r.success) alert('导出成功'); else alert('导出失败: ' + r.error) } },
-                  { label: t('exportPinned'), action: async () => { const r = await exportAsMarkdown({ onlyPinned: true }); if (r.success) alert('导出成功'); else alert('导出失败: ' + r.error) } },
-                  { label: t('exportText'), action: async () => { const r = await exportAsText(); if (r.success) alert('导出成功'); else alert('导出失败: ' + r.error) } },
+                  {
+                    label: t('exportMarkdown'),
+                    action: async () => {
+                      const r = await exportAsMarkdown()
+                      if (r.success) pushToast('导出成功', 'success')
+                      else pushToast('导出失败: ' + r.error, 'error')
+                    },
+                  },
+                  {
+                    label: t('exportPinned'),
+                    action: async () => {
+                      const r = await exportAsMarkdown({ onlyPinned: true })
+                      if (r.success) pushToast('导出成功', 'success')
+                      else pushToast('导出失败: ' + r.error, 'error')
+                    },
+                  },
+                  {
+                    label: t('exportText'),
+                    action: async () => {
+                      const r = await exportAsText()
+                      if (r.success) pushToast('导出成功', 'success')
+                      else pushToast('导出失败: ' + r.error, 'error')
+                    },
+                  },
                 ].map((item) => (
                   <button
                     key={item.label}
@@ -664,14 +1063,16 @@ export function Chat() {
         style={{ borderColor: T.border }}
       >
         <div className="w-full px-12 py-8 space-y-8">
-          {/* 档案已加载提示 */}
-          {archiveLoaded && (
-            <div className="w-full text-center">
-              <span className="text-[11px] italic tracking-wide" style={{ color: T.textMuted }}>
-                {t('systemReady')}
-              </span>
-            </div>
-          )}
+          {/* 项目记忆状态提示 */}
+          <div className="w-full text-center">
+            <span className="text-[11px] italic tracking-wide" style={{ color: T.textMuted }}>
+              {!currentConversation.projectPath
+                ? t('memoryUnbound')
+                : archiveLoaded
+                  ? t('memoryLoaded').replace('{{count}}', String(archiveEntryCount))
+                  : t('systemReady')}
+            </span>
+          </div>
 
           {messages.length === 0 && !isStreaming && !archiveLoaded && (
             <div className="flex items-center justify-center py-24">
@@ -715,8 +1116,7 @@ export function Chat() {
                     ) : message ? (
                       <MessageItem
                         message={message}
-                        highlightKeyword={highlightMessageId === message.id ? undefined : undefined}
-                        isHighlighted={highlightMessageId === message.id}
+                        highlightKeyword={highlightMessageId === message.id ? highlightKeyword : undefined}
                         onPin={() => toggleMessagePinned(message.id)}
                         onDelete={() => deleteMessage(message.id)}
                         onBranch={async () => {
@@ -755,7 +1155,7 @@ export function Chat() {
               style={{ backgroundColor: `${T.mainBg}d9` }}
             >
               <p className="text-[12px] font-bold uppercase tracking-widest" style={{ color: T.accent }}>
-                拖放图片或文本文件到这里
+                拖放图片或文本文档到这里
               </p>
             </div>
           )}
@@ -782,6 +1182,33 @@ export function Chat() {
             </div>
           )}
 
+          {/* 待发送的文档预览 */}
+          {pendingDocs.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {pendingDocs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="relative border rounded-sm px-2 py-1 pr-6 text-[11px] max-w-[240px]"
+                  style={{ borderColor: T.border, backgroundColor: T.mainBg, color: T.textPrimary }}
+                  title={doc.name}
+                >
+                  <span className="block truncate">
+                    {doc.name}
+                    {doc.truncated ? ' · 已截断' : ''}
+                  </span>
+                  <button
+                    onClick={() => handleRemovePendingDoc(doc.id)}
+                    className="absolute top-0.5 right-1 text-xs"
+                    style={{ color: T.warning }}
+                    title="移除文档"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* 输入框 — min-h 自然撑开，去除固定 h-32 */}
           <textarea
             ref={textareaRef}
@@ -793,8 +1220,8 @@ export function Chat() {
                 handleSend()
               }
             }}
-            placeholder={canSend ? t('placeholder') : t('placeholderNoApi')}
-            disabled={!canSend || isStreaming}
+            placeholder={canEditInput ? t('placeholder') : t('placeholderNoApi')}
+            disabled={!canEditInput}
             className="w-full min-h-[80px] max-h-[40vh] bg-transparent text-sm resize-none focus:outline-none leading-relaxed placeholder:opacity-40 disabled:opacity-50"
             style={{ color: T.textPrimary }}
           />
@@ -807,21 +1234,21 @@ export function Chat() {
                 className="flex items-center gap-5 pr-6 border-r opacity-40 group-focus-within:opacity-100 transition-opacity"
                 style={{ borderColor: T.border, color: T.textMuted }}
               >
-                {/* Upload — 图片上传 */}
+                {/* Upload — 图片/文档上传 */}
                 <label
                   className="cursor-pointer transition-colors"
-                  title="上传图片"
+                  title="上传图片或文档"
                   onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
                   onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
                 >
                   <Upload size={18} strokeWidth={1.5} />
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/*,.txt,.md,.markdown,text/plain,text/markdown"
                     multiple
-                    onChange={handleImageUpload}
+                    onChange={handleFileUpload}
                     className="hidden"
-                    disabled={!canSend || isStreaming}
+                    disabled={!canEditInput}
                   />
                 </label>
               </div>
@@ -854,7 +1281,7 @@ export function Chat() {
               </button>
               <button
                 onClick={handleSend}
-                disabled={!canSend || isStreaming || (!input.trim() && pendingImages.length === 0)}
+                disabled={!canSend || isStreaming || (!input.trim() && pendingImages.length === 0 && pendingDocs.length === 0)}
                 className="w-12 h-12 flex items-center justify-center transition-all shadow-sm active:translate-y-px disabled:opacity-40 disabled:cursor-not-allowed disabled:active:translate-y-0 rounded-sm hover:opacity-90"
                 style={{ backgroundColor: T.accent, color: T.mainBg }}
                 title="发送"
@@ -906,9 +1333,9 @@ export function Chat() {
                   const name = exportFileName.trim().endsWith('.md') ? exportFileName.trim() : exportFileName.trim() + '.md'
                   const result = await saveToFile(longContentPrompt.content, name)
                   if (result.success) {
-                    alert(`已导出到 ${result.path}`)
+                    pushToast(`已导出到 ${result.path}`, 'success')
                   } else {
-                    alert('导出失败：' + result.error)
+                    pushToast('导出失败：' + result.error, 'error')
                   }
                   setLongContentPrompt(null)
                 }}
@@ -989,10 +1416,10 @@ export function Chat() {
                   const name = designOutputName.trim().endsWith('.md') ? designOutputName.trim() : designOutputName.trim() + '.md'
                   const result = await exportSelectedMdAsDesign(selectedMdFile, name)
                   if (result.success) {
-                    alert(`已导出到 ${result.path}`)
+                    pushToast(`已导出到 ${result.path}`, 'success')
                     setShowDesignDocPanel(false)
                   } else {
-                    alert('转换失败：' + result.error)
+                    pushToast('转换失败：' + result.error, 'error')
                   }
                 }}
                 disabled={isExporting || mdFiles.length === 0}

@@ -8,16 +8,17 @@ import { registerApiHandlers } from './ipc/api'
 import { registerUpdaterHandlers, checkForUpdates } from './ipc/updater'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-console.log('__dirname:', __dirname)
 
 // 正确计算项目根目录
 // __dirname = dist-electron, 根目录 = ..
 process.env.APP_ROOT = path.join(__dirname, '..')
-console.log('APP_ROOT calculated:', process.env.APP_ROOT)
 
-export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
+const rawDevServerUrl = process.env['VITE_DEV_SERVER_URL']?.trim()
+const useDevServer = process.env['UNIT_USE_DEV_SERVER'] === '1' && !!rawDevServerUrl
+export const VITE_DEV_SERVER_URL = useDevServer ? rawDevServerUrl : undefined
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
+const DEV_LOG = Boolean(VITE_DEV_SERVER_URL)
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, 'public')
@@ -26,9 +27,22 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 let win: BrowserWindow | null
 
 function createWindow() {
+  const existingWindow = win && !win.isDestroyed()
+    ? win
+    : BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) || null
+
+  if (existingWindow) {
+    win = existingWindow
+    if (win.isMinimized()) win.restore()
+    win.focus()
+    return
+  }
+
   const preloadPath = path.join(__dirname, 'preload.js')
-  console.log('Preload path:', preloadPath)
-  console.log('Preload exists:', fs.existsSync(preloadPath))
+  if (DEV_LOG) {
+    console.log('Preload path:', preloadPath)
+    console.log('Preload exists:', fs.existsSync(preloadPath))
+  }
 
   // 加载图标
   const iconPath = path.join(process.env.APP_ROOT || '', 'resources', 'icon.png')
@@ -59,23 +73,36 @@ function createWindow() {
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+
+  win.on('closed', () => {
+    win = null
+  })
 }
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  createWindow()
+})
 
 // API Key 加密存储
 ipcMain.handle('settings:encrypt', async (_event, value: string) => {
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(value)
-    return encrypted.toString('base64')
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Safe storage encryption is not available on this system')
   }
-  return value
+  const encrypted = safeStorage.encryptString(value)
+  return encrypted.toString('base64')
 })
 
 ipcMain.handle('settings:decrypt', async (_event, encryptedValue: string) => {
-  if (safeStorage.isEncryptionAvailable()) {
-    const buffer = Buffer.from(encryptedValue, 'base64')
-    return safeStorage.decryptString(buffer)
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Safe storage decryption is not available on this system')
   }
-  return encryptedValue
+  const buffer = Buffer.from(encryptedValue, 'base64')
+  return safeStorage.decryptString(buffer)
 })
 
 // 注册 IPC 处理器
@@ -92,22 +119,24 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow()
-  }
+  createWindow()
 })
 
 app.whenReady().then(() => {
   // 设置 Dock 图标 (macOS)
   if (process.platform === 'darwin' && app.dock) {
     const iconPath = path.join(process.env.APP_ROOT!, 'resources', 'icon.png')
-    console.log('APP_ROOT:', process.env.APP_ROOT)
-    console.log('Dock icon path:', iconPath)
-    console.log('Icon exists:', fs.existsSync(iconPath))
+    if (DEV_LOG) {
+      console.log('APP_ROOT:', process.env.APP_ROOT)
+      console.log('Dock icon path:', iconPath)
+      console.log('Icon exists:', fs.existsSync(iconPath))
+    }
     if (fs.existsSync(iconPath)) {
       const iconImage = nativeImage.createFromPath(iconPath)
       app.dock.setIcon(iconImage)
-      console.log('Dock icon set')
+      if (DEV_LOG) {
+        console.log('Dock icon set')
+      }
     }
   }
 

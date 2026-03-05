@@ -16,6 +16,20 @@ interface ReleaseInfo {
   downloadUrl: string
 }
 
+interface ReleaseAsset {
+  name?: string
+  browser_download_url?: string
+}
+
+interface GithubRelease {
+  message?: string
+  tag_name?: string
+  published_at?: string
+  body?: string
+  html_url?: string
+  assets?: ReleaseAsset[]
+}
+
 function fetchLatestRelease(): Promise<ReleaseInfo> {
   return new Promise((resolve, reject) => {
     const options = {
@@ -32,20 +46,20 @@ function fetchLatestRelease(): Promise<ReleaseInfo> {
       res.on('data', (chunk) => { data += chunk })
       res.on('end', () => {
         try {
-          const release = JSON.parse(data)
+          const release = JSON.parse(data) as GithubRelease
           if (release.message) {
             reject(new Error(release.message))
             return
           }
           const version = release.tag_name?.replace(/^v/, '') ?? ''
-          const dmgAsset = release.assets?.find((a: any) =>
+          const dmgAsset = release.assets?.find((a) =>
             a.name?.endsWith('.dmg') && a.name?.includes('universal')
           )
           resolve({
             version,
             releaseDate: release.published_at ?? '',
             releaseNotes: typeof release.body === 'string' ? release.body.slice(0, 500) : '',
-            downloadUrl: dmgAsset?.browser_download_url ?? release.html_url,
+            downloadUrl: dmgAsset?.browser_download_url ?? release.html_url ?? '',
           })
         } catch (e) {
           reject(e)
@@ -150,7 +164,7 @@ export function registerUpdaterHandlers() {
   })
 }
 
-function sendToAllWindows(channel: string, data?: any) {
+function sendToAllWindows(channel: string, data?: unknown) {
   const windows = BrowserWindow.getAllWindows()
   windows.forEach((win) => {
     if (!win.isDestroyed()) {

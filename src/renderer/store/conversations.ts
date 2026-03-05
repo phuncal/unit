@@ -227,7 +227,6 @@ export const useConversationsStore = create<ConversationsStore>()((set, get) => 
   },
 
   setStreaming: (streaming, content = '') => {
-    console.log('[Store] setStreaming:', streaming, 'content length:', content.length)
     set({ isStreaming: streaming, streamingContent: content })
   },
 
@@ -238,7 +237,6 @@ export const useConversationsStore = create<ConversationsStore>()((set, get) => 
   },
 
   clearStreamingContent: () => {
-    console.log('[Store] Clearing streaming state')
     set({ isStreaming: false, streamingContent: '' })
   },
 

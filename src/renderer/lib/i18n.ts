@@ -1,5 +1,6 @@
 // 全局双语字典 — 100% 照搬 UnitRedesign.jsx translations，并补全项目所有 UI 字符串
 import { useSettingsStore } from '@/store/settings'
+import { useCallback } from 'react'
 
 export const translations = {
   zh: {
@@ -10,6 +11,9 @@ export const translations = {
     selectTemplate:  '选择模板',
     bindFolder:      '绑定本地目录',
     boundDir:        '已绑定目录',
+    reuseRecentDirOn:'沿用最近目录：开',
+    reuseRecentDirOff:'沿用最近目录：关',
+    clearBoundDir:   '清空目录',
     rename:          '重命名',
     delete:          '删除',
     cancel:          '取消',
@@ -19,17 +23,19 @@ export const translations = {
     settings:        '系统设置',
     stats:           '费用统计',
     templates:       '模板管理',
-    archive:         '设定档案',
+    archive:         '项目记忆',
 
     // 欢迎封面
     standbyTitle:    'UNIT',
     standbyDesc:     '精密讨论仪器 / MODEL V1.2.1',
 
     // 聊天 header
-    updateArchive:   '更新档案',
+    updateArchive:   '提取新结论',
 
     // 聊天消息区
-    systemReady:     '已读取项目档案 archive.md，可以开始对话。',
+    systemReady:     '已加载项目记忆（archive.md）',
+    memoryLoaded:    '已加载项目记忆 · {{count}} 条结论',
+    memoryUnbound:   '未绑定项目目录（当前对话不会使用项目记忆）',
     startChat:       '开始对话吧',
 
     // 输入框
@@ -45,10 +51,24 @@ export const translations = {
 
     // 系统设置面板
     language:        '界面语言 / LANGUAGE',
+    apiConnections:  'API 连接池（最多 3 组）',
+    connectionName:  '连接名称',
+    connectionDefaultName: '连接 {{index}}',
+    connectionNamePlaceholder: '例如：主力 / 备用 / 测试',
     apiEndpoint:     'API ENDPOINT',
     orgId:           '组织 ID / ORG ID（可选）',
     apiKey:          'API KEY',
     modelName:       '模型名称 / MODEL',
+    modelSwitcher:   '会话模型切换',
+    modelUnconfigured:'未配置模型',
+    applyModel:      '应用模型',
+    searchModel:     '搜索模型...',
+    modelNotFound:   '没有匹配的模型',
+    noModelsFetched: '暂无模型，请点击"获取模型"',
+    contextLength:   '上下文',
+    cachedModels:    '已缓存 {{count}} 个模型',
+    fillApiFirst:    '请先填写 API Endpoint 和 API Key',
+    modelsUpdated:   '模型列表已更新',
     maxTokens:       '最大输出 TOKEN',
     contextLimit:    '上下文警告阈值',
     slidingWindow:   '滑动窗口大小',
@@ -75,14 +95,15 @@ export const translations = {
     check:           'CHECK',
 
     // 档案面板
-    archiveTitle:       '设定档案',
-    archiveEmpty:       '档案为空，点击"更新档案"提取对话结论',
-    editArchive:        '编辑',
+    archiveTitle:       '项目记忆（archive.md）',
+    archiveEmpty:       '项目记忆为空，点击"提取新结论"生成可写入内容',
+    editArchive:        '手动编辑全文',
     saveEdit:           '保存',
-    confirmWrite:       '确认写入',
-    previewLabel:       '待写入内容预览（可编辑）',
-    emptyArchive:       '档案内容为空...',
-    updateArchiveBtn:   '更新档案',
+    confirmWrite:       '写入项目记忆',
+    previewLabel:       '提取结果预览（仅结论，可编辑）',
+    archiveFlowHint:    '流程：先提取新结论，再确认写入项目记忆',
+    emptyArchive:       '项目记忆内容为空...',
+    updateArchiveBtn:   '提取新结论',
     noNewContent:       '无新增内容',
     writeFailed:        '写入失败：',
 
@@ -139,7 +160,7 @@ export const translations = {
     // 通用
     saveTip:            '保存',
     uploadImage:        '上传图片',
-    openArchive:        '设定档案',
+    openArchive:        '项目记忆',
     contextSelect:      '选择发送的上下文',
     sendTooltip:        '发送',
     regenerate:         '重新生成',
@@ -152,6 +173,9 @@ export const translations = {
     selectTemplate:  'SELECT TEMPLATE',
     bindFolder:      'Bind Local Directory',
     boundDir:        'DIRECTORY BOUND',
+    reuseRecentDirOn:'Reuse Recent Dir: ON',
+    reuseRecentDirOff:'Reuse Recent Dir: OFF',
+    clearBoundDir:   'Clear Directory',
     rename:          'Rename',
     delete:          'Delete',
     cancel:          'CANCEL',
@@ -161,17 +185,19 @@ export const translations = {
     settings:        'SYSTEM PREFS',
     stats:           'ANALYTICS',
     templates:       'TEMPLATES',
-    archive:         'ARCHIVE',
+    archive:         'PROJECT MEMORY',
 
     // Welcome
     standbyTitle:    'UNIT',
     standbyDesc:     'PRECISION INSTRUMENT / MODEL V1.2.1',
 
     // Chat header
-    updateArchive:   'UPDATE ARCHIVE',
+    updateArchive:   'EXTRACT CONCLUSIONS',
 
     // Message area
-    systemReady:     'Archive.md loaded. System standby.',
+    systemReady:     'Project memory loaded (archive.md).',
+    memoryLoaded:    'Project memory loaded · {{count}} conclusions',
+    memoryUnbound:   'No project folder bound (memory is disabled for this chat)',
     startChat:       'Start a conversation',
 
     // Input
@@ -187,10 +213,24 @@ export const translations = {
 
     // Settings panel
     language:        'INTERFACE LANGUAGE',
+    apiConnections:  'API CONNECTION POOL (MAX 3)',
+    connectionName:  'CONNECTION NAME',
+    connectionDefaultName: 'Connection {{index}}',
+    connectionNamePlaceholder: 'e.g. Primary / Backup / Test',
     apiEndpoint:     'API ENDPOINT',
     orgId:           'ORGANIZATION ID (OPTIONAL)',
     apiKey:          'API KEY',
     modelName:       'MODEL NAME',
+    modelSwitcher:   'MODEL SWITCHER',
+    modelUnconfigured:'MODEL NOT SET',
+    applyModel:      'APPLY MODEL',
+    searchModel:     'Search models...',
+    modelNotFound:   'No matched model',
+    noModelsFetched: 'No models yet. Click Fetch Models.',
+    contextLength:   'Context',
+    cachedModels:    '{{count}} models cached',
+    fillApiFirst:    'Fill API endpoint and key first.',
+    modelsUpdated:   'Model list updated',
     maxTokens:       'MAX OUTPUT TOKEN',
     contextLimit:    'CONTEXT ALERT LIMIT',
     slidingWindow:   'SLIDING WINDOW',
@@ -217,14 +257,15 @@ export const translations = {
     check:           'CHECK',
 
     // Archive panel
-    archiveTitle:       'ARCHIVE',
-    archiveEmpty:       'Archive is empty. Click "Update Archive" to extract conclusions.',
-    editArchive:        'Edit',
+    archiveTitle:       'PROJECT MEMORY (archive.md)',
+    archiveEmpty:       'Project memory is empty. Click "Extract Conclusions" to prepare new entries.',
+    editArchive:        'Manual Edit (Full File)',
     saveEdit:           'Save',
-    confirmWrite:       'Confirm Write',
-    previewLabel:       'Preview (Editable)',
-    emptyArchive:       'Archive is empty...',
-    updateArchiveBtn:   'Update Archive',
+    confirmWrite:       'Write to Project Memory',
+    previewLabel:       'Extracted Conclusions (Editable)',
+    archiveFlowHint:    'Flow: extract conclusions first, then write to project memory',
+    emptyArchive:       'Project memory is empty...',
+    updateArchiveBtn:   'Extract Conclusions',
     noNewContent:       'No new content',
     writeFailed:        'Write failed: ',
 
@@ -281,7 +322,7 @@ export const translations = {
     // General
     saveTip:            'Save',
     uploadImage:        'Upload Image',
-    openArchive:        'Archive',
+    openArchive:        'Project Memory',
     contextSelect:      'Select context to send',
     sendTooltip:        'Send',
     regenerate:         'Regenerate',
@@ -293,9 +334,10 @@ export type TranslationKey = keyof typeof translations.zh
 // 全局 useTranslation hook — 所有组件直接调用，自动响应 lang 变化
 export function useTranslation() {
   const lang = useSettingsStore((state) => state.lang)
-  const t = (key: TranslationKey): string =>
+  const t = useCallback((key: TranslationKey): string => (
     (translations[lang] as Record<string, string>)[key] ??
     (translations.zh as Record<string, string>)[key] ??
     key
+  ), [lang])
   return { t, lang }
 }

@@ -33,6 +33,105 @@ interface CostEstimate {
   hasPricing: boolean
 }
 
+interface ChatRequestBody {
+  model: string
+  messages: ChatMessage[]
+  max_tokens: number
+  stream: boolean
+  stream_options?: { include_usage: boolean }
+}
+
+interface RawModelInfo {
+  id?: string
+  name?: string
+  context_length?: number
+  max_tokens?: number
+  owned_by?: string
+  provider?: string
+}
+
+const DEV_LOG = import.meta.env.DEV
+type EndpointDeliveryMode = 'stream' | 'non-stream'
+const endpointModeCache = new Map<string, EndpointDeliveryMode>()
+
+function createAttemptError(message: string, canFallback = true): Error & { canFallback: boolean } {
+  const error = new Error(message) as Error & { canFallback: boolean }
+  error.canFallback = canFallback
+  return error
+}
+
+function normalizeContentValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object') {
+          const part = item as { text?: unknown; type?: unknown }
+          if (typeof part.text === 'string') return part.text
+          if (typeof part.type === 'string' && part.type === 'text' && typeof (item as { value?: unknown }).value === 'string') {
+            return (item as { value: string }).value
+          }
+        }
+        return ''
+      })
+      .join('')
+  }
+  return ''
+}
+
+function extractContentFromChunk(parsed: unknown): string {
+  if (!parsed || typeof parsed !== 'object') return ''
+  const data = parsed as {
+    choices?: Array<{
+      delta?: { content?: unknown; text?: unknown }
+      message?: { content?: unknown }
+      text?: unknown
+    }>
+    delta?: { text?: unknown; content?: unknown }
+    text?: unknown
+    output_text?: unknown
+    output?: Array<{ content?: unknown }>
+    candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>
+  }
+
+  return (
+    normalizeContentValue(data.choices?.[0]?.delta?.content) ||
+    normalizeContentValue(data.choices?.[0]?.delta?.text) ||
+    normalizeContentValue(data.choices?.[0]?.message?.content) ||
+    normalizeContentValue(data.choices?.[0]?.text) ||
+    normalizeContentValue(data.delta?.text) ||
+    normalizeContentValue(data.delta?.content) ||
+    normalizeContentValue(data.output_text) ||
+    normalizeContentValue(data.output?.[0]?.content) ||
+    normalizeContentValue(data.text) ||
+    normalizeContentValue(data.candidates?.[0]?.content?.parts?.[0]?.text)
+  )
+}
+
+function extractContentFromResponseBody(parsed: unknown): string {
+  if (!parsed || typeof parsed !== 'object') return ''
+  const data = parsed as {
+    choices?: Array<{
+      message?: { content?: unknown }
+      text?: unknown
+    }>
+    output_text?: unknown
+    output?: Array<{ content?: unknown }>
+    text?: unknown
+    candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>
+  }
+
+  return (
+    normalizeContentValue(data.choices?.[0]?.message?.content) ||
+    normalizeContentValue(data.choices?.[0]?.text) ||
+    normalizeContentValue(data.output_text) ||
+    normalizeContentValue(data.output?.[0]?.content) ||
+    normalizeContentValue(data.text) ||
+    normalizeContentValue(data.candidates?.[0]?.content?.parts?.[0]?.text)
+  )
+}
+
 // 检查是否是 Anthropic API
 function isAnthropicApi(endpoint: string): boolean {
   return endpoint.includes('anthropic.com')
@@ -193,182 +292,248 @@ export async function sendChatMessage(
   systemPrompt: string | undefined,
   callbacks: StreamCallbacks
 ): Promise<void> {
-  console.log('[API] sendChatMessage called with:', {
-    endpoint: settings.apiEndpoint,
-    modelName: settings.modelName,
-    hasApiKey: !!settings.apiKey,
-    apiKeyPrefix: settings.apiKey ? settings.apiKey.substring(0, 8) + '...' : 'none',
-    messageCount: messages.length,
-    hasSystemPrompt: !!systemPrompt,
-  })
+  if (DEV_LOG) {
+    console.log('[API] sendChatMessage called with:', {
+      endpoint: settings.apiEndpoint,
+      modelName: settings.modelName,
+      hasApiKey: !!settings.apiKey,
+      messageCount: messages.length,
+      hasSystemPrompt: !!systemPrompt,
+    })
+  }
 
   const isAnthropic = isAnthropicApi(settings.apiEndpoint)
   const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic)
+  const cleanEndpoint = settings.apiEndpoint.replace(/\/+$/, '')
 
-  try {
-    // 只有 OpenAI 原生 API 支持 stream_options
-    const isOpenaiNative = settings.apiEndpoint.includes('api.openai.com')
+  const preferredMode = endpointModeCache.get(cleanEndpoint) || 'stream'
+  const attemptModes: EndpointDeliveryMode[] = preferredMode === 'stream'
+    ? ['stream', 'non-stream']
+    : ['non-stream', 'stream']
 
-    // 检测是否是 Gemini 模型 + gptsapi.net - 该服务对 Gemini 流式响应有兼容性问题
-    const isGeminiModel = settings.modelName.toLowerCase().includes('gemini')
-    const isGptsApiNet = settings.apiEndpoint.includes('gptsapi.net')
-    const disableStreaming = isGeminiModel && isGptsApiNet
-    const useStreaming = !disableStreaming
+  let lastError: Error | null = null
 
-    // 清理 endpoint 末尾的斜杠
-    const cleanEndpoint = settings.apiEndpoint.replace(/\/+$/, '')
-
-    const requestBody: Record<string, any> = {
-      model: settings.modelName,
-      messages: formattedMessages,
-      max_tokens: settings.maxTokens,
-      stream: useStreaming,
-    }
-
-    // 只对 OpenAI 原生 API 添加 stream_options
-    if (isOpenaiNative && useStreaming) {
-      requestBody.stream_options = { include_usage: true }
-    }
-
-    const url = `${cleanEndpoint}/chat/completions`
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${settings.apiKey}`,
-    }
-
-    console.log('[API] Request details:', {
-      url,
-      model: settings.modelName,
-      stream: useStreaming,
-      messagesCount: formattedMessages.length,
-    })
-
-    // 非流式模式处理
-    if (!useStreaming) {
-      const response = await window.api.http.fetch({
-        url,
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-      })
-
-      if (response.status !== 200) {
-        throw new Error(`API Error: ${response.status} - ${response.body}`)
-      }
-
-      const data = JSON.parse(response.body)
-      const content = data.choices?.[0]?.message?.content || ''
-      const usage: StreamUsage = {
-        promptTokens: data.usage?.prompt_tokens,
-        completionTokens: data.usage?.completion_tokens,
-      }
-
-      callbacks.onToken(content)
-      callbacks.onComplete(content, usage)
-      return
-    }
-
-    // 流式模式处理 - 使用主进程 API
-    let fullContent = ''
-    let usage: StreamUsage = {}
-    let errorBody = ''
-    let hasError = false
-
-    await window.api.http.fetchStream(
-      {
-        url,
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-      },
-      {
-        onStatus: (status) => {
-          console.log('[API] Response status:', status.status, status.statusText)
-          if (status.status !== 200) {
-            hasError = true
-            console.error('[API] Non-200 status code:', status)
+  for (const mode of attemptModes) {
+    try {
+      if (mode === 'stream') {
+        const streamResult = await new Promise<{ content: string; usage: StreamUsage }>((resolve, reject) => {
+          // 只有 OpenAI 原生 API 支持 stream_options
+          const isOpenaiNative = settings.apiEndpoint.includes('api.openai.com')
+          const requestBody: ChatRequestBody = {
+            model: settings.modelName,
+            messages: formattedMessages,
+            max_tokens: settings.maxTokens,
+            stream: true,
           }
-        },
-        onData: (line) => {
-          const trimmed = line.trim()
-          if (!trimmed) return
-
-          // 处理两种格式：标准 SSE (data: {...}) 和纯 JSON 行
-          let jsonStr = trimmed
-          if (trimmed.startsWith('data: ')) {
-            jsonStr = trimmed.slice(6)
-            if (jsonStr === '[DONE]') return
+          if (isOpenaiNative) {
+            requestBody.stream_options = { include_usage: true }
           }
 
-          try {
-            const parsed = JSON.parse(jsonStr)
+          const url = `${cleanEndpoint}/chat/completions`
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.apiKey}`,
+          }
 
-            // 检查是否是错误响应
-            if (parsed.error) {
-              hasError = true
-              errorBody = parsed.error.message || JSON.stringify(parsed.error)
+          if (DEV_LOG) {
+            console.log('[API] Request details:', {
+              url,
+              model: settings.modelName,
+              stream: true,
+              messagesCount: formattedMessages.length,
+            })
+          }
+
+          let fullContent = ''
+          const usage: StreamUsage = {}
+          let errorBody = ''
+          let hasError = false
+          let hasToken = false
+          let settled = false
+          const startedAt = performance.now()
+          let firstTokenAt: number | null = null
+
+          const safeReject = (message: string, canFallback = true) => {
+            if (settled) return
+            settled = true
+            reject(createAttemptError(message, canFallback))
+          }
+
+          const safeResolve = () => {
+            if (settled) return
+            if (hasError || errorBody) {
+              safeReject(errorBody || 'API请求失败', !hasToken)
               return
             }
-
-            // 处理内容 - 支持多种格式
-            let content = parsed.choices?.[0]?.delta?.content
-
-            // 某些中转服务可能使用不同的字段结构
-            if (!content) {
-              content = parsed.choices?.[0]?.message?.content
-                || parsed.delta?.text
-                || parsed.text
-                || parsed.candidates?.[0]?.content?.parts?.[0]?.text
+            if (!fullContent.trim()) {
+              safeReject('EMPTY_STREAM_RESPONSE', true)
+              return
             }
-
-            if (content) {
-              fullContent += content
-              callbacks.onToken(content)
+            if (DEV_LOG) {
+              console.log('[API] Stream total(ms):', Math.round(performance.now() - startedAt), cleanEndpoint)
             }
-
-            // 处理 token 用量（在最后一个 chunk 中）
-            if (parsed.usage) {
-              usage.promptTokens = parsed.usage.prompt_tokens
-              usage.completionTokens = parsed.usage.completion_tokens
-              if (parsed.usage.cache_read_input_tokens) {
-                usage.cacheReadTokens = parsed.usage.cache_read_input_tokens
-              }
-            }
-
-            // OpenAI 格式的 usage（可能在 message 字段中）
-            if (parsed.message?.usage) {
-              usage.promptTokens = parsed.message.usage.prompt_tokens
-              usage.completionTokens = parsed.message.usage.completion_tokens
-            }
-          } catch (e) {
-            // 不是 JSON 且有错误状态，收集为错误信息
-            if (hasError) {
-              errorBody += trimmed
-            }
+            settled = true
+            resolve({ content: fullContent, usage })
           }
-        },
-        onEnd: () => {
-          if (hasError || errorBody) {
-            console.error('[API] Stream ended with error:', errorBody)
-            callbacks.onError(new Error(errorBody || 'API请求失败'))
-          } else if (!fullContent) {
-            console.warn('[API] Stream completed but no content received')
-            callbacks.onError(new Error('未收到响应内容，请检查模型名称是否正确'))
-          } else {
-            console.log('[API] Stream completed successfully. Content length:', fullContent.length)
-            callbacks.onComplete(fullContent, usage)
-          }
-        },
-        onError: (error) => {
-          console.error('[API] Stream error:', error)
-          callbacks.onError(new Error(error))
-        },
+
+          window.api.http.fetchStream(
+            {
+              url,
+              method: 'POST',
+              headers,
+              body: JSON.stringify(requestBody),
+            },
+            {
+              onStatus: (status) => {
+                if (DEV_LOG) {
+                  console.log('[API] Response status:', status.status, status.statusText)
+                }
+                if (status.status !== 200) {
+                  hasError = true
+                  console.error('[API] Non-200 status code:', status)
+                }
+              },
+              onData: (line) => {
+                if (settled) return
+                const trimmed = line.trim()
+                if (!trimmed) return
+
+                // 兼容 data:[DONE] / data: [DONE] / [DONE]
+                if (/^data:\s*\[DONE\]\s*$/i.test(trimmed) || trimmed === '[DONE]') {
+                  safeResolve()
+                  return
+                }
+
+                // 处理两种格式：标准 SSE (data: {...}) 和纯 JSON 行
+                let jsonStr = trimmed
+                let isDataLine = false
+                if (trimmed.startsWith('data:')) {
+                  isDataLine = true
+                  jsonStr = trimmed.replace(/^data:\s*/, '')
+                  if (jsonStr === '[DONE]') {
+                    safeResolve()
+                    return
+                  }
+                }
+
+                try {
+                  const parsed = JSON.parse(jsonStr) as {
+                    error?: { message?: string }
+                    usage?: {
+                      prompt_tokens?: number
+                      completion_tokens?: number
+                      cache_read_input_tokens?: number
+                    }
+                    message?: {
+                      usage?: {
+                        prompt_tokens?: number
+                        completion_tokens?: number
+                      }
+                    }
+                  }
+
+                  // 检查是否是错误响应
+                  if (parsed.error) {
+                    hasError = true
+                    errorBody = parsed.error.message || JSON.stringify(parsed.error)
+                    return
+                  }
+
+                  // 处理内容 - 支持多种平台/中转格式
+                  const content = extractContentFromChunk(parsed)
+                  if (content) {
+                    if (firstTokenAt === null) {
+                      firstTokenAt = performance.now()
+                      if (DEV_LOG) {
+                        console.log('[API] Stream TTFT(ms):', Math.round(firstTokenAt - startedAt), cleanEndpoint)
+                      }
+                    }
+                    hasToken = true
+                    fullContent += content
+                    callbacks.onToken(content)
+                  }
+
+                  // 处理 token 用量（在最后一个 chunk 中）
+                  if (parsed.usage) {
+                    usage.promptTokens = parsed.usage.prompt_tokens
+                    usage.completionTokens = parsed.usage.completion_tokens
+                    if (parsed.usage.cache_read_input_tokens) {
+                      usage.cacheReadTokens = parsed.usage.cache_read_input_tokens
+                    }
+                  }
+
+                  // OpenAI 格式的 usage（可能在 message 字段中）
+                  if (parsed.message?.usage) {
+                    usage.promptTokens = parsed.message.usage.prompt_tokens
+                    usage.completionTokens = parsed.message.usage.completion_tokens
+                  }
+                } catch {
+                  if (isDataLine && jsonStr && !jsonStr.startsWith('{') && !jsonStr.startsWith('[')) {
+                    // 某些服务端会把纯文本 token 放在 data: 后面
+                    if (firstTokenAt === null) {
+                      firstTokenAt = performance.now()
+                      if (DEV_LOG) {
+                        console.log('[API] Stream TTFT(ms):', Math.round(firstTokenAt - startedAt), cleanEndpoint)
+                      }
+                    }
+                    hasToken = true
+                    fullContent += jsonStr
+                    callbacks.onToken(jsonStr)
+                    return
+                  }
+                  // 不是 JSON 且有错误状态，收集为错误信息
+                  if (hasError) {
+                    errorBody += trimmed
+                  }
+                }
+              },
+              onEnd: () => {
+                safeResolve()
+              },
+              onError: (error) => {
+                safeReject(error, !hasToken)
+              },
+            }
+          ).catch((error) => {
+            const message = error instanceof Error ? error.message : String(error)
+            safeReject(message, true)
+          })
+        })
+
+        endpointModeCache.set(cleanEndpoint, 'stream')
+        callbacks.onComplete(streamResult.content, streamResult.usage)
+        return
       }
-    )
-  } catch (error) {
-    console.error('[API] Caught exception in sendChatMessage:', error)
-    callbacks.onError(error instanceof Error ? error : new Error(String(error)))
+
+      const content = await sendNonStreamMessage(settings, messages, systemPrompt)
+      if (DEV_LOG) {
+        console.log('[API] Non-stream completed:', cleanEndpoint)
+      }
+      if (!content.trim()) {
+        throw createAttemptError('未收到响应内容，请检查模型名称是否正确', false)
+      }
+      endpointModeCache.set(cleanEndpoint, 'non-stream')
+      callbacks.onToken(content)
+      callbacks.onComplete(content)
+      return
+    } catch (error) {
+      const attemptError = error instanceof Error ? error : new Error(String(error))
+      const canFallback = (attemptError as Error & { canFallback?: boolean }).canFallback ?? true
+      lastError = attemptError
+
+      if (DEV_LOG) {
+        const reason = attemptError.message === 'EMPTY_STREAM_RESPONSE'
+          ? 'empty-stream'
+          : attemptError.message
+        console.warn(`[API] ${mode} attempt failed for ${cleanEndpoint}:`, reason)
+      }
+
+      if (!canFallback) break
+    }
   }
+
+  console.error('[API] Caught exception in sendChatMessage:', lastError)
+  callbacks.onError(lastError || new Error('未收到模型响应，请重试'))
 }
 
 export async function sendNonStreamMessage(
@@ -402,7 +567,7 @@ export async function sendNonStreamMessage(
   }
 
   const data = JSON.parse(response.body)
-  return data.choices?.[0]?.message?.content || ''
+  return extractContentFromResponseBody(data)
 }
 
 // 检查模型是否支持视觉
@@ -438,14 +603,24 @@ export async function fetchModels(
 
     // OpenAI 格式：{ data: [{ id, object, created, owned_by, ... }] }
     // 部分平台可能有不同的格式
-    const rawModels = data.data || data.models || []
+    const rawModels: unknown[] = Array.isArray(data.data)
+      ? data.data
+      : Array.isArray(data.models)
+        ? data.models
+        : []
 
-    const models: import('@/types').ModelInfo[] = rawModels.map((m: any) => ({
-      id: m.id || m.name || m,
-      name: m.name || m.id || m,
-      contextLength: m.context_length || m.max_tokens || undefined,
-      ownedBy: m.owned_by || m.provider || undefined,
-    }))
+    const models: import('@/types').ModelInfo[] = rawModels.map((m) => {
+      if (typeof m === 'string') {
+        return { id: m, name: m }
+      }
+      const model = (m ?? {}) as RawModelInfo
+      return {
+        id: model.id || model.name || '',
+        name: model.name || model.id || '',
+        contextLength: model.context_length || model.max_tokens || undefined,
+        ownedBy: model.owned_by || model.provider || undefined,
+      }
+    }).filter((m) => m.id)
 
     // 按名称排序
     models.sort((a, b) => (a.id || '').localeCompare(b.id || ''))

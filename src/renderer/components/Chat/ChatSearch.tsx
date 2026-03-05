@@ -6,7 +6,7 @@ import type { Message } from '@/types'
 import { useTranslation } from '@/lib/i18n'
 
 interface ChatSearchProps {
-  onHighlight: (messageId: string) => void
+  onHighlight: (messageId: string, keyword: string) => void
 }
 
 export function ChatSearch({ onHighlight }: ChatSearchProps) {
@@ -25,7 +25,7 @@ export function ChatSearch({ onHighlight }: ChatSearchProps) {
     const searchResults = await searchMessages(keyword)
     setResults(searchResults)
     setCurrentIndex(0)
-    if (searchResults.length > 0) onHighlight(searchResults[0].id)
+    if (searchResults.length > 0) onHighlight(searchResults[0].id, keyword)
   }, [keyword, currentConversation, searchMessages, onHighlight])
 
   useEffect(() => {
@@ -37,14 +37,14 @@ export function ChatSearch({ onHighlight }: ChatSearchProps) {
     if (results.length === 0) return
     const newIndex = currentIndex > 0 ? currentIndex - 1 : results.length - 1
     setCurrentIndex(newIndex)
-    onHighlight(results[newIndex].id)
+    onHighlight(results[newIndex].id, keyword)
   }
 
   const handleNext = () => {
     if (results.length === 0) return
     const newIndex = currentIndex < results.length - 1 ? currentIndex + 1 : 0
     setCurrentIndex(newIndex)
-    onHighlight(results[newIndex].id)
+    onHighlight(results[newIndex].id, keyword)
   }
 
   const handleClose = () => {

@@ -3,6 +3,7 @@ import { X, RotateCcw, Edit2, Check } from 'lucide-react'
 import { useConversationsStore } from '@/store/conversations'
 import { useArchive } from '@/hooks/useArchive'
 import { useSettingsStore } from '@/store/settings'
+import { useUIStore } from '@/store/ui'
 import { T } from '@/lib/tokens'
 import { useTranslation } from '@/lib/i18n'
 
@@ -10,15 +11,10 @@ export function ArchivePanel() {
   const { t } = useTranslation()
   const { currentConversation } = useConversationsStore()
   const { isUpdating, previewText, showPreview, updateArchive, confirmUpdate, cancelUpdate } = useArchive()
+  const pushToast = useUIStore((s) => s.pushToast)
   const isArchivePanelOpen = useSettingsStore((s) => s.isArchivePanelOpen)
   const setArchivePanelOpen = useSettingsStore((s) => s.setArchivePanelOpen)
 
-  const [isOpen, setIsOpen] = useState(false)
-
-  // 同步 store 状态到本地
-  useEffect(() => {
-    if (isArchivePanelOpen && !isOpen) setIsOpen(true)
-  }, [isArchivePanelOpen])
   const [archiveContent, setArchiveContent] = useState<string>('')
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -38,8 +34,8 @@ export function ArchivePanel() {
   }, [currentConversation?.projectPath])
 
   useEffect(() => {
-    if (isOpen) loadArchive()
-  }, [isOpen, loadArchive])
+    if (isArchivePanelOpen) loadArchive()
+  }, [isArchivePanelOpen, loadArchive])
 
   useEffect(() => {
     if (showPreview) setEditablePreview(previewText)
@@ -47,15 +43,16 @@ export function ArchivePanel() {
 
   const handleUpdateArchive = async () => {
     const result = await updateArchive()
-    if (result?.empty) alert(t('noNewContent'))
+    if (result?.empty) pushToast(t('noNewContent'), 'info')
   }
 
   const handleConfirmUpdate = async () => {
     const result = await confirmUpdate(editablePreview)
     if (result?.success) {
       await loadArchive()
+      pushToast(t('confirmWrite'), 'success')
     } else {
-      alert(t('writeFailed') + (result?.error || '未知错误'))
+      pushToast(t('writeFailed') + (result?.error || '未知错误'), 'error')
     }
   }
 
@@ -74,7 +71,7 @@ export function ArchivePanel() {
   return (
     <>
       {/* 侧边抽屉 — 由 Sidebar FileDown 图标触发，无浮动按钮 */}
-      {isOpen && (
+      {isArchivePanelOpen && (
         <div
           className="fixed inset-0 z-40 flex justify-end"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -83,7 +80,7 @@ export function ArchivePanel() {
           <div
             className="flex-1"
             style={{ backgroundColor: 'rgba(43,42,39,0.15)' }}
-            onClick={() => { setIsOpen(false); setArchivePanelOpen(false) }}
+            onClick={() => setArchivePanelOpen(false)}
           />
           <div
             className="w-[420px] h-full shadow-2xl flex flex-col"
@@ -109,7 +106,7 @@ export function ArchivePanel() {
                 </span>
               </div>
               <button
-                onClick={() => { setIsOpen(false); setArchivePanelOpen(false) }}
+                onClick={() => setArchivePanelOpen(false)}
                 className="transition-transform hover:rotate-90"
               >
                 <X size={16} style={{ color: T.textMuted }} />
@@ -170,6 +167,11 @@ export function ArchivePanel() {
                   </button>
                 </>
               )}
+            </div>
+            <div className="px-5 py-2 border-b" style={{ borderColor: T.border, backgroundColor: T.sidebarBg }}>
+              <p className="text-[10px]" style={{ color: T.textMuted }}>
+                {t('archiveFlowHint')}
+              </p>
             </div>
 
             {/* 新增内容预览 */}

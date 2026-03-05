@@ -47,6 +47,19 @@ const db = new Dexie('UnitDB') as Dexie & {
   templates: EntityTable<ConversationTemplate, 'id'>
 }
 
+function stripConversationId<T extends { conversationId: string }>(item: T): Omit<T, 'conversationId'> {
+  const { conversationId: ignoredConversationId, ...rest } = item
+  void ignoredConversationId
+  return rest
+}
+
+// v1 基础表结构（从未对外发布，声明以确保 Dexie 迁移路径完整）
+db.version(1).stores({
+  conversations: 'id, name, projectPath, createdAt, updatedAt',
+  messages: 'id, conversationId, createdAt, pinned',
+})
+
+// v2 新增 templates 表、conversations 新增费用统计字段
 db.version(2).stores({
   conversations: 'id, name, projectPath, createdAt, updatedAt',
   messages: 'id, conversationId, createdAt, pinned',
@@ -105,7 +118,7 @@ export const conversationDB = {
       .equals(conversationId)
       .sortBy('createdAt')
 
-    return msgs.map(({ conversationId: _, ...msg }) => msg)
+    return msgs.map(stripConversationId)
   },
 
   async updateTokenCount(id: string, tokenCount: number): Promise<void> {
@@ -155,15 +168,14 @@ export const messageDB = {
   async getById(id: string) {
     const msg = await db.messages.get(id)
     if (!msg) return null
-    const { conversationId: _, ...message } = msg
-    return message
+    return stripConversationId(msg)
   },
 
   async getByConversation(conversationId: string, options?: {
     limit?: number
     offset?: number
   }) {
-    let query = db.messages
+    const query = db.messages
       .where('conversationId')
       .equals(conversationId)
 
@@ -172,10 +184,10 @@ export const messageDB = {
     if (options?.offset || options?.limit) {
       const start = options.offset || 0
       const end = options.limit ? start + options.limit : undefined
-      return msgs.slice(start, end).map(({ conversationId: _, ...msg }) => msg)
+      return msgs.slice(start, end).map(stripConversationId)
     }
 
-    return msgs.map(({ conversationId: _, ...msg }) => msg)
+    return msgs.map(stripConversationId)
   },
 
   async update(id: string, data: Partial<Omit<DBMessage, 'id' | 'conversationId' | 'createdAt'>>): Promise<void> {
@@ -221,7 +233,7 @@ export const messageDB = {
           block.type === 'text' && block.text?.toLowerCase().includes(lowerKeyword)
         )
       )
-      .map(({ conversationId: _, ...msg }) => msg)
+      .map(stripConversationId)
   },
 
   async getPinned(conversationId: string) {
@@ -233,7 +245,7 @@ export const messageDB = {
 
     return msgs
       .sort((a, b) => a.createdAt - b.createdAt)
-      .map(({ conversationId: _, ...msg }) => msg)
+      .map(stripConversationId)
   },
 }
 

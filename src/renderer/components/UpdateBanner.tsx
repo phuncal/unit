@@ -21,7 +21,7 @@ export function UpdateBanner() {
       setDismissed(false)
     })
     const unsubscribeError = window.api.updater.onError((error) => {
-      console.log('[UpdateBanner] Update check error (silently ignored):', error)
+      console.warn('[UpdateBanner] Update check error (silently ignored):', error)
     })
     return () => { unsubscribe(); unsubscribeError() }
   }, [])
