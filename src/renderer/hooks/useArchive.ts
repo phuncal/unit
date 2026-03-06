@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
-import { sendNonStreamMessage } from '@/api/client'
+import { sendNonStreamMessage, applySlidingWindow } from '@/api/client'
 
 const ARCHIVE_UPDATE_PROMPT = `请从“最近对话”里提取可写入项目记忆（archive.md）的新增结论。
 
@@ -41,10 +41,20 @@ export function useArchive() {
         existingArchive || '(空)',
       ].join('\n')
 
+      // 应用滑动窗口，减少 archive 更新请求的 token 消耗
+      const windowedMessages = applySlidingWindow(
+        currentConversation.messages,
+        settings.slidingWindowSize
+      )
+
+      if (import.meta.env.DEV) {
+        console.log('[Archive update] windowed messages:', windowedMessages.length, '/', currentConversation.messages.length)
+      }
+
       // 将分析指令作为最后一条 user 消息追加到对话末尾
       // 这里 system prompt 负责定义规则，最后一条 user 负责触发执行
       const messagesWithPrompt = [
-        ...currentConversation.messages,
+        ...windowedMessages,
         {
           id: 'archive-prompt',
           role: 'user' as const,
@@ -57,7 +67,8 @@ export function useArchive() {
       const result = await sendNonStreamMessage(
         settings,
         messagesWithPrompt,
-        systemPrompt
+        systemPrompt,
+        existingArchive || undefined
       )
 
       const normalized = result.trim().replace(/^```[\s\S]*?\n|```$/g, '').trim()

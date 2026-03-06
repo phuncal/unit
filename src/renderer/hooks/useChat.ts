@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useConversationsStore } from '@/store/conversations'
 import { useSettingsStore } from '@/store/settings'
 import { useUIStore } from '@/store/ui'
@@ -7,6 +7,7 @@ import {
   isVisionModel,
   applySlidingWindow,
   estimateCost,
+  estimateMessageTokens,
 } from '@/api/client'
 import {
   type ContentBlock,
@@ -16,6 +17,13 @@ import {
 import { conversationDB } from '@/db'
 
 const STREAM_TIMEOUT_MS = 120000
+
+// 模块级 archive 内存缓存（跨渲染保留）
+let archiveCacheRef: { content: string; hash: string; conversationId: string } | null = null
+
+function archiveHash(content: string): string {
+  return `${content.length}:${content.slice(0, 64)}`
+}
 
 export function useChat() {
   // 使用单独的 selector 确保正确订阅
@@ -31,8 +39,15 @@ export function useChat() {
 
   const settings = useSettingsStore((state) => state.settings)
 
-  // 缓存最近一次构建的 system prompt，用于费用预估
+  // 缓存最近一次构建的 system prompt 字符串（用于费用预估）
   const lastSystemPromptRef = useRef<string>('')
+
+  // 对话切换时清空 archive 缓存
+  useEffect(() => {
+    if (currentConversation?.id && archiveCacheRef?.conversationId !== currentConversation.id) {
+      archiveCacheRef = null
+    }
+  }, [currentConversation?.id])
 
   // 计算滑动窗口后的消息
   const contextMessages = useMemo(() => {
@@ -44,52 +59,80 @@ export function useChat() {
     return applySlidingWindow(allMessages, windowSize)
   }, [currentConversation, settings.slidingWindowSize])
 
-  // 计算上下文统计
+  // 计算上下文统计（含实际发送 token 数 + pinned token 数）
   const contextStats = useMemo(() => {
     if (!currentConversation) return null
 
     const totalMessages = currentConversation.messages.length
     const carriedMessages = contextMessages.length
     const pinnedCount = currentConversation.messages.filter((m) => m.pinned).length
+    const sentTokens = contextMessages.reduce((sum, m) => sum + estimateMessageTokens(m), 0)
+    const pinnedTokens = currentConversation.messages
+      .filter((m) => m.pinned)
+      .reduce((sum, m) => sum + estimateMessageTokens(m), 0)
 
     return {
       total: totalMessages,
       carried: carriedMessages,
       pinned: pinnedCount,
+      sentTokens,
+      pinnedTokens,
     }
   }, [currentConversation, contextMessages])
 
-  // 构建完整的 system prompt（包括档案内容和回复风格）
-  const buildSystemPrompt = useCallback(async (): Promise<string | undefined> => {
-    if (!currentConversation) return undefined
+  // 构建 system prompt，返回拆分结果 { base, archive }
+  const buildSystemPrompt = useCallback(async (): Promise<{ base: string; archive: string }> => {
+    if (!currentConversation) return { base: '', archive: '' }
 
     // 获取回复风格（对话级别 > 全局设置）
     const replyStyle = currentConversation.replyStyle || settings.replyStyle
     const stylePrompt = REPLY_STYLE_PROMPTS[replyStyle] || ''
 
-    let systemPrompt = currentConversation.systemPrompt || ''
+    let base = currentConversation.systemPrompt || ''
 
     // 添加回复风格提示
     if (stylePrompt) {
-      systemPrompt = stylePrompt + '\n\n' + systemPrompt
+      base = stylePrompt + '\n\n' + base
     }
 
-    // 如果有绑定目录，尝试读取 archive.md
+    let archive = ''
+
+    // 如果有绑定目录，尝试读取 archive.md（带内存缓存）
     if (currentConversation.projectPath) {
-      try {
-        const result = await window.api.archive.read(currentConversation.projectPath)
-        if (result.success && result.content && result.content.trim()) {
-          // 将档案内容作为 system prompt 的一部分
-          const archiveSection = `\n\n---\n\n以下是与本次讨论相关的设定档案：\n\n${result.content}`
-          systemPrompt = systemPrompt + archiveSection
+      const convId = currentConversation.id
+      if (archiveCacheRef && archiveCacheRef.conversationId === convId) {
+        // 命中缓存，跳过磁盘读
+        archive = archiveCacheRef.content
+      } else {
+        try {
+          const result = await window.api.archive.read(currentConversation.projectPath)
+          if (result.success && result.content && result.content.trim()) {
+            archive = result.content.trim()
+            archiveCacheRef = {
+              content: archive,
+              hash: archiveHash(archive),
+              conversationId: convId,
+            }
+            if (import.meta.env.DEV) {
+              console.log('[Archive] Read from disk, hash:', archiveHash(archive))
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to read archive:', error)
         }
-      } catch (error) {
-        console.warn('Failed to read archive:', error)
       }
     }
 
-    return systemPrompt.trim() || undefined
+    return { base: base.trim(), archive }
   }, [currentConversation, settings.replyStyle])
+
+  // 计算历史 assistant 消息输出 token 均值
+  const avgOutputTokens = useMemo(() => {
+    const msgs = currentConversation?.messages ?? []
+    const asstMsgs = msgs.filter((m) => m.role === 'assistant' && (m.outputTokens ?? 0) > 0)
+    if (asstMsgs.length === 0) return undefined
+    return Math.round(asstMsgs.reduce((s, m) => s + (m.outputTokens ?? 0), 0) / asstMsgs.length)
+  }, [currentConversation?.messages])
 
   // 计算预估费用
   const costEstimate = useMemo(() => {
@@ -101,9 +144,10 @@ export function useChat() {
       contextMessages,
       lastSystemPromptRef.current,
       settings.modelName,
-      MODEL_PRICING
+      MODEL_PRICING,
+      avgOutputTokens
     )
-  }, [currentConversation, contextMessages, settings.modelName])
+  }, [currentConversation, contextMessages, settings.modelName, avgOutputTokens])
 
   const sendMessage = useCallback(async (content: ContentBlock[], overrideContextIds?: string[]) => {
     if (!currentConversation || isStreaming) return
@@ -147,9 +191,10 @@ export function useChat() {
         messagesToSend = applySlidingWindow(allMessages, settings.slidingWindowSize)
       }
 
-      // 4. 构建包含档案的 system prompt
-      const fullSystemPrompt = await buildSystemPrompt()
-      lastSystemPromptRef.current = fullSystemPrompt || ''
+      // 4. 构建包含档案的 system prompt（拆分为 base + archive）
+      const { base: basePrompt, archive: archivePrompt } = await buildSystemPrompt()
+      // 用于费用预估的完整字符串
+      lastSystemPromptRef.current = [basePrompt, archivePrompt].filter(Boolean).join('\n\n---\n\n')
 
       // 5. 开始流式响应
       setStreaming(true, '')
@@ -165,7 +210,7 @@ export function useChat() {
       await sendChatMessage(
         settings,
         messagesToSend,
-        fullSystemPrompt,
+        basePrompt || undefined,
         {
           onToken: (token) => {
             if (settled) return
@@ -215,7 +260,8 @@ export function useChat() {
 
             pushToast(`发送失败：${error.message}`, 'error')
           },
-        }
+        },
+        archivePrompt || undefined
       )
 
       if (!settled) {

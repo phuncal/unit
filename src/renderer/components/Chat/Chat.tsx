@@ -1,4 +1,12 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import React from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import type { Components } from 'react-markdown'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import mammoth from 'mammoth'
+
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   Send, Upload, Download, ChevronDown,
@@ -24,6 +32,8 @@ import {
   type ContentBlock,
 } from '@/types'
 import { ManualPanel } from '@/components/ManualPanel'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
 interface PendingDocument {
   id: string
@@ -72,6 +82,154 @@ function highlightText(text: string | undefined, keyword: string | undefined): R
   return parts.length > 0 ? parts : text
 }
 
+function applyHighlightToChildren(children: React.ReactNode, keyword?: string): React.ReactNode {
+  if (!keyword || !keyword.trim()) return children
+  return React.Children.map(children, (child) => {
+    if (typeof child === 'string') return highlightText(child, keyword)
+    if (React.isValidElement(child) && (child.props as any).children) {
+      return React.cloneElement(child, {
+        ...(child.props as any),
+        children: applyHighlightToChildren((child.props as any).children, keyword),
+      })
+    }
+    return child
+  })
+}
+
+function MarkdownRenderer({ content, highlightKeyword }: { content: string; highlightKeyword?: string }) {
+  const components: Components = {
+    p: ({ children }) => (
+      <p style={{ marginBottom: 6 }}>
+        {applyHighlightToChildren(children, highlightKeyword)}
+      </p>
+    ),
+    h1: ({ children }) => (
+      <h3 style={{ fontWeight: 700, marginBottom: 6, marginTop: 12 }}>{children}</h3>
+    ),
+    h2: ({ children }) => (
+      <h3 style={{ fontWeight: 700, marginBottom: 6, marginTop: 12 }}>{children}</h3>
+    ),
+    h3: ({ children }) => (
+      <h4 style={{ fontWeight: 600, marginBottom: 4, marginTop: 10 }}>{children}</h4>
+    ),
+    h4: ({ children }) => (
+      <h4 style={{ fontWeight: 600, marginBottom: 4, marginTop: 10 }}>{children}</h4>
+    ),
+    h5: ({ children }) => (
+      <h4 style={{ fontWeight: 600, marginBottom: 4, marginTop: 8 }}>{children}</h4>
+    ),
+    h6: ({ children }) => (
+      <h4 style={{ fontWeight: 600, marginBottom: 4, marginTop: 8 }}>{children}</h4>
+    ),
+    code: ({ children, className }) => {
+      const isBlock = className?.startsWith('language-')
+      if (isBlock) return <code className={className}>{children}</code>
+      return (
+        <code
+          style={{
+            fontFamily: 'SF Mono, ui-monospace, monospace',
+            backgroundColor: 'rgba(43,42,39,0.07)',
+            padding: '1px 5px',
+            borderRadius: 3,
+            fontSize: '0.9em',
+          }}
+        >
+          {children}
+        </code>
+      )
+    },
+    pre: ({ children }) => (
+      <pre
+        style={{
+          fontFamily: 'SF Mono, ui-monospace, monospace',
+          backgroundColor: 'rgba(43,42,39,0.06)',
+          border: '1px solid #D8D6D0',
+          borderRadius: 4,
+          padding: '8px 12px',
+          overflowX: 'auto',
+          marginBottom: 8,
+          fontSize: '0.85em',
+          lineHeight: 1.6,
+        }}
+      >
+        {children}
+      </pre>
+    ),
+    blockquote: ({ children }) => (
+      <blockquote
+        style={{
+          borderLeft: '2px solid #D8D6D0',
+          color: '#8A8880',
+          paddingLeft: 12,
+          marginLeft: 0,
+          marginBottom: 6,
+        }}
+      >
+        {children}
+      </blockquote>
+    ),
+    table: ({ children }) => (
+      <table style={{ borderCollapse: 'collapse', marginBottom: 8, width: '100%' }}>{children}</table>
+    ),
+    th: ({ children }) => (
+      <th style={{ border: '1px solid #D8D6D0', padding: '3px 8px', fontWeight: 600 }}>{children}</th>
+    ),
+    td: ({ children }) => (
+      <td style={{ border: '1px solid #D8D6D0', padding: '3px 8px' }}>{children}</td>
+    ),
+    hr: () => (
+      <hr style={{ borderTop: '1px solid #D8D6D0', margin: '8px 0' }} />
+    ),
+    a: ({ children, href }) => (
+      <a
+        href={href}
+        style={{ color: '#3D6B5E' }}
+        onClick={(e) => e.preventDefault()}
+      >
+        {children}
+      </a>
+    ),
+    li: ({ children }) => (
+      <li style={{ marginBottom: 2 }}>
+        {applyHighlightToChildren(children, highlightKeyword)}
+      </li>
+    ),
+    strong: ({ children }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
+    em: ({ children }) => <em>{children}</em>,
+  }
+
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {content}
+    </ReactMarkdown>
+  )
+}
+
+// ============================================================
+// PDF / DOCX extraction (module-level)
+// ============================================================
+async function extractPdfText(file: File): Promise<{ text: string; pageCount: number }> {
+  const arrayBuffer = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise
+  const pageCount = pdf.numPages
+  const pages = await Promise.all(
+    Array.from({ length: pageCount }, (_, i) =>
+      pdf.getPage(i + 1).then((p) => p.getTextContent()).then((tc) =>
+        tc.items.map((item: any) => ('str' in item ? item.str : '')).join(' ')
+      )
+    )
+  )
+  return { text: pages.join('\n\n'), pageCount }
+}
+
+async function extractDocxText(file: File): Promise<{ text: string; wordCount: number }> {
+  const arrayBuffer = await file.arrayBuffer()
+  const result = await mammoth.extractRawText({ arrayBuffer })
+  const text = result.value
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length
+  return { text, wordCount }
+}
+
 // ============================================================
 // MessageItem — 100% 照搬 UnitRedesign.jsx 消息结构
 // ============================================================
@@ -114,12 +272,21 @@ function MessageItem({
         </div>
 
         {/* 正文 */}
-        <div
-          className="text-sm leading-relaxed mb-3 whitespace-pre-wrap break-words"
-          style={{ color: T.textPrimary }}
-        >
-          {highlightKeyword ? highlightText(content, highlightKeyword) : content}
-        </div>
+        {isUser ? (
+          <div
+            className="text-sm leading-relaxed mb-3 whitespace-pre-wrap break-words"
+            style={{ color: T.textPrimary }}
+          >
+            {highlightKeyword ? highlightText(content, highlightKeyword) : content}
+          </div>
+        ) : (
+          <div
+            className="text-sm leading-relaxed mb-3 break-words"
+            style={{ color: T.textPrimary }}
+          >
+            <MarkdownRenderer content={content || ''} highlightKeyword={highlightKeyword} />
+          </div>
+        )}
 
         {/* 图片 */}
         {!isStreaming && message.content.some((b) => b.type === 'image') && (
@@ -481,11 +648,18 @@ export function Chat() {
 
   const isTextDocumentFile = useCallback((file: File) => {
     const name = file.name.toLowerCase()
+    const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : ''
+    const textExts = ['.txt', '.md', '.markdown', '.json', '.csv', '.xml', '.rtf']
+    const docExts = ['.pdf', '.docx']
     return (
       file.type.startsWith('text/') ||
-      name.endsWith('.txt') ||
-      name.endsWith('.md') ||
-      name.endsWith('.markdown')
+      file.type === 'application/pdf' ||
+      file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      file.type === 'application/json' ||
+      file.type === 'application/xml' ||
+      file.type === 'application/rtf' ||
+      textExts.includes(ext) ||
+      docExts.includes(ext)
     )
   }, [])
 
@@ -509,19 +683,37 @@ export function Chat() {
 
   const addDocumentToPending = useCallback(async (file: File) => {
     try {
-      const text = await file.text()
-      if (!text.trim()) return
-      const originalLength = text.length
+      const name = file.name.toLowerCase()
+      let rawText: string
+      let metaInfo = ''
+
+      if (name.endsWith('.pdf') || file.type === 'application/pdf') {
+        const { text, pageCount } = await extractPdfText(file)
+        rawText = text
+        metaInfo = ` (${pageCount} 页)`
+      } else if (
+        name.endsWith('.docx') ||
+        file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      ) {
+        const { text, wordCount } = await extractDocxText(file)
+        rawText = text
+        metaInfo = ` (${wordCount} 字)`
+      } else {
+        rawText = await file.text()
+      }
+
+      if (!rawText.trim()) return
+      const originalLength = rawText.length
       const truncated = originalLength > MAX_PENDING_DOC_CHARS
       const trimmedContent = truncated
-        ? `${text.slice(0, MAX_PENDING_DOC_CHARS)}\n\n[文档已截断，原始长度 ${originalLength} 字]`
-        : text
+        ? `${rawText.slice(0, MAX_PENDING_DOC_CHARS)}\n\n[文档已截断，原始长度 ${originalLength} 字]`
+        : rawText
 
       setPendingDocs((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
-          name: file.name,
+          name: file.name + metaInfo,
           content: trimmedContent,
           originalLength,
           truncated,
@@ -750,8 +942,17 @@ export function Chat() {
           {/* 上下文统计 */}
           {contextStats && (
             <span className="text-[10px] font-mono" style={{ color: T.textMuted, opacity: 0.6 }}>
-              携带 {contextStats.carried} / {contextStats.total}
-              {contextStats.pinned > 0 && ` · ${contextStats.pinned}⚓`}
+              携带 {contextStats.carried} / {contextStats.total} · ≈{contextStats.sentTokens}t
+              {contextStats.pinned > 0 && (
+                <span
+                  style={{ color: contextStats.pinnedTokens > 8000 ? T.warning : 'inherit' }}
+                  title={contextStats.pinnedTokens > 8000
+                    ? `锚点消息共 ~${contextStats.pinnedTokens}t，建议取消部分锚点`
+                    : undefined}
+                >
+                  {' · '}{contextStats.pinned}⚓
+                </span>
+              )}
             </span>
           )}
           {/* 费用预估 */}
@@ -1155,7 +1356,7 @@ export function Chat() {
               style={{ backgroundColor: `${T.mainBg}d9` }}
             >
               <p className="text-[12px] font-bold uppercase tracking-widest" style={{ color: T.accent }}>
-                拖放图片或文本文档到这里
+                拖放图片或文档到这里（PDF、DOCX、TXT、MD、JSON、CSV、XML）
               </p>
             </div>
           )}
@@ -1244,7 +1445,7 @@ export function Chat() {
                   <Upload size={18} strokeWidth={1.5} />
                   <input
                     type="file"
-                    accept="image/*,.txt,.md,.markdown,text/plain,text/markdown"
+                    accept="image/*,.txt,.md,.markdown,.pdf,.docx,.json,.csv,.xml,.rtf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/json,text/csv,application/xml,text/xml,application/rtf"
                     multiple
                     onChange={handleFileUpload}
                     className="hidden"

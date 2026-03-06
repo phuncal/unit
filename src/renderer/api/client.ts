@@ -195,7 +195,8 @@ export function estimateCost(
   messages: Message[],
   systemPrompt: string,
   modelName: string,
-  pricing: typeof MODEL_PRICING
+  pricing: typeof MODEL_PRICING,
+  avgOutputTokens?: number
 ): CostEstimate {
   let inputTokens = 0
 
@@ -214,8 +215,10 @@ export function estimateCost(
 
   if (modelPricing) {
     const [, prices] = modelPricing
-    // 预估输出 token 为输入的 1/4
-    const estimatedOutputTokens = Math.min(inputTokens / 4, 4096)
+    // 若提供历史均值则使用，否则 fallback 到输入的 1/4
+    const estimatedOutputTokens = avgOutputTokens !== undefined
+      ? avgOutputTokens
+      : Math.min(inputTokens / 4, 4096)
     const cost = (inputTokens * prices.input + estimatedOutputTokens * prices.output) / 1000
 
     return {
@@ -235,21 +238,41 @@ export function estimateCost(
 function formatMessages(
   messages: Message[],
   systemPrompt?: string,
-  isAnthropic?: boolean
+  isAnthropic?: boolean,
+  archiveContent?: string
 ): ChatMessage[] {
   const formatted: ChatMessage[] = []
 
   // 添加 system prompt
-  if (systemPrompt) {
-    const systemMessage: ChatMessage = {
-      role: 'system',
-      content: systemPrompt,
+  if (isAnthropic) {
+    // Anthropic：base prompt 和 archive 各独立一条 system message
+    if (systemPrompt) {
+      // base system prompt — 不加 cache_control
+      formatted.push({
+        role: 'system',
+        content: systemPrompt,
+      })
     }
-    // Anthropic API 支持 cache_control
-    if (isAnthropic) {
-      systemMessage.cache_control = { type: 'ephemeral' }
+    if (archiveContent) {
+      // archive 内容 — 加 cache_control，独立缓存
+      const archiveSection = `以下是与本次讨论相关的设定档案：\n\n${archiveContent}`
+      formatted.push({
+        role: 'system',
+        content: archiveSection,
+        cache_control: { type: 'ephemeral' },
+      })
     }
-    formatted.push(systemMessage)
+  } else {
+    // 非 Anthropic：拼接成一个字符串
+    const parts: string[] = []
+    if (systemPrompt) parts.push(systemPrompt)
+    if (archiveContent) parts.push(`\n\n---\n\n以下是与本次讨论相关的设定档案：\n\n${archiveContent}`)
+    if (parts.length > 0) {
+      formatted.push({
+        role: 'system',
+        content: parts.join(''),
+      })
+    }
   }
 
   // 添加对话消息
@@ -290,7 +313,8 @@ export async function sendChatMessage(
   settings: Settings,
   messages: Message[],
   systemPrompt: string | undefined,
-  callbacks: StreamCallbacks
+  callbacks: StreamCallbacks,
+  archiveContent?: string
 ): Promise<void> {
   if (DEV_LOG) {
     console.log('[API] sendChatMessage called with:', {
@@ -299,11 +323,12 @@ export async function sendChatMessage(
       hasApiKey: !!settings.apiKey,
       messageCount: messages.length,
       hasSystemPrompt: !!systemPrompt,
+      hasArchive: !!archiveContent,
     })
   }
 
   const isAnthropic = isAnthropicApi(settings.apiEndpoint)
-  const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic)
+  const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic, archiveContent)
   const cleanEndpoint = settings.apiEndpoint.replace(/\/+$/, '')
 
   const preferredMode = endpointModeCache.get(cleanEndpoint) || 'stream'
@@ -505,7 +530,7 @@ export async function sendChatMessage(
         return
       }
 
-      const content = await sendNonStreamMessage(settings, messages, systemPrompt)
+      const content = await sendNonStreamMessage(settings, messages, systemPrompt, archiveContent)
       if (DEV_LOG) {
         console.log('[API] Non-stream completed:', cleanEndpoint)
       }
@@ -539,10 +564,11 @@ export async function sendChatMessage(
 export async function sendNonStreamMessage(
   settings: Settings,
   messages: Message[],
-  systemPrompt: string | undefined
+  systemPrompt: string | undefined,
+  archiveContent?: string
 ): Promise<string> {
   const isAnthropic = isAnthropicApi(settings.apiEndpoint)
-  const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic)
+  const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic, archiveContent)
 
   const cleanEndpoint = settings.apiEndpoint.replace(/\/+$/, '')
   const url = `${cleanEndpoint}/chat/completions`
