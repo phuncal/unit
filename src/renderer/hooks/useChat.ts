@@ -118,7 +118,7 @@ export function useChat() {
             }
           }
         } catch (error) {
-          console.warn('Failed to read archive:', error)
+          if (import.meta.env.DEV) console.warn('Failed to read archive:', error)
         }
       }
     }
@@ -154,7 +154,7 @@ export function useChat() {
 
     // 检查是否包含图片且模型不支持视觉
     const hasImage = content.some((block) => block.type === 'image')
-    if (hasImage && !isVisionModel(settings.modelName)) {
+    if (hasImage && !isVisionModel(settings.modelName) && import.meta.env.DEV) {
       console.warn('Model may not support images:', settings.modelName)
     }
 
@@ -254,7 +254,7 @@ export function useChat() {
             if (settled) return
             settled = true
             window.clearTimeout(streamTimeout)
-            console.error('Chat error:', error)
+            if (import.meta.env.DEV) console.error('Chat error:', error)
             // 清除流式状态
             clearStreamingContent()
 
@@ -271,7 +271,7 @@ export function useChat() {
         pushToast('未收到模型响应，请重试。', 'error')
       }
     } catch (error) {
-      console.error('Failed to send message:', error)
+      if (import.meta.env.DEV) console.error('Failed to send message:', error)
       // 清除流式状态
       clearStreamingContent()
 

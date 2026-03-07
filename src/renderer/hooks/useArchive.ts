@@ -83,7 +83,7 @@ export function useArchive() {
       setIsUpdating(false)
       return { success: true, empty: false }
     } catch (error) {
-      console.error('Failed to update archive:', error)
+      if (import.meta.env.DEV) console.error('Failed to update archive:', error)
       setIsUpdating(false)
       return { success: false, error }
     }
@@ -101,7 +101,7 @@ export function useArchive() {
 
       return { success: true }
     } catch (error) {
-      console.error('Failed to confirm update:', error)
+      if (import.meta.env.DEV) console.error('Failed to confirm update:', error)
       return { success: false, error }
     }
   }, [currentConversation])
@@ -121,7 +121,7 @@ export function useArchive() {
       }
       return null
     } catch (error) {
-      console.error('Failed to read archive:', error)
+      if (import.meta.env.DEV) console.error('Failed to read archive:', error)
       return null
     }
   }, [currentConversation])

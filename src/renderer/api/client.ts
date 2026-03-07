@@ -415,7 +415,7 @@ export async function sendChatMessage(
                 }
                 if (status.status !== 200) {
                   hasError = true
-                  console.error('[API] Non-200 status code:', status)
+                  if (DEV_LOG) console.error('[API] Non-200 status code:', status)
                 }
               },
               onData: (line) => {
@@ -557,7 +557,7 @@ export async function sendChatMessage(
     }
   }
 
-  console.error('[API] Caught exception in sendChatMessage:', lastError)
+  if (DEV_LOG) console.error('[API] Caught exception in sendChatMessage:', lastError)
   callbacks.onError(lastError || new Error('未收到模型响应，请重试'))
 }
 

@@ -6,6 +6,7 @@ import type { Components } from 'react-markdown'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import mammoth from 'mammoth'
+import JSZip from 'jszip'
 
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
@@ -230,6 +231,32 @@ async function extractDocxText(file: File): Promise<{ text: string; wordCount: n
   return { text, wordCount }
 }
 
+async function extractPptxText(file: File): Promise<{ text: string; slideCount: number }> {
+  const arrayBuffer = await file.arrayBuffer()
+  const zip = await JSZip.loadAsync(arrayBuffer)
+  const slideFiles = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/\d+/)?.[0] ?? '0')
+      const nb = parseInt(b.match(/\d+/)?.[0] ?? '0')
+      return na - nb
+    })
+
+  const texts: string[] = []
+  for (const slidePath of slideFiles) {
+    const xml = await zip.files[slidePath].async('text')
+    // 提取所有 <a:t> 标签内的文本
+    const matches = xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) ?? []
+    const slideText = matches
+      .map((m) => m.replace(/<[^>]+>/g, '').trim())
+      .filter(Boolean)
+      .join(' ')
+    if (slideText) texts.push(slideText)
+  }
+
+  return { text: texts.join('\n\n'), slideCount: slideFiles.length }
+}
+
 // ============================================================
 // MessageItem — 100% 照搬 UnitRedesign.jsx 消息结构
 // ============================================================
@@ -407,6 +434,8 @@ export function Chat() {
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<ContentBlock[]>([])
   const [pendingDocs, setPendingDocs] = useState<PendingDocument[]>([])
+  const [isProcessingFile, setIsProcessingFile] = useState(false)
+  const [fileError, setFileError] = useState<string | null>(null)
 
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null)
   const [highlightKeyword, setHighlightKeyword] = useState<string | undefined>(undefined)
@@ -650,11 +679,13 @@ export function Chat() {
     const name = file.name.toLowerCase()
     const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : ''
     const textExts = ['.txt', '.md', '.markdown', '.json', '.csv', '.xml', '.rtf']
-    const docExts = ['.pdf', '.docx']
+    const docExts = ['.pdf', '.docx', '.pptx', '.ppt']
     return (
       file.type.startsWith('text/') ||
       file.type === 'application/pdf' ||
       file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+      file.type === 'application/vnd.ms-powerpoint' ||
       file.type === 'application/json' ||
       file.type === 'application/xml' ||
       file.type === 'application/rtf' ||
@@ -682,6 +713,8 @@ export function Chat() {
   }, [])
 
   const addDocumentToPending = useCallback(async (file: File) => {
+    setIsProcessingFile(true)
+    setFileError(null)
     try {
       const name = file.name.toLowerCase()
       let rawText: string
@@ -698,11 +731,23 @@ export function Chat() {
         const { text, wordCount } = await extractDocxText(file)
         rawText = text
         metaInfo = ` (${wordCount} 字)`
+      } else if (
+        name.endsWith('.pptx') ||
+        name.endsWith('.ppt') ||
+        file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+        file.type === 'application/vnd.ms-powerpoint'
+      ) {
+        const { text, slideCount } = await extractPptxText(file)
+        rawText = text
+        metaInfo = ` (${slideCount} 页)`
       } else {
         rawText = await file.text()
       }
 
-      if (!rawText.trim()) return
+      if (!rawText.trim()) {
+        setFileError(`「${file.name}」未能提取到文本内容`)
+        return
+      }
       const originalLength = rawText.length
       const truncated = originalLength > MAX_PENDING_DOC_CHARS
       const trimmedContent = truncated
@@ -721,6 +766,9 @@ export function Chat() {
       ])
     } catch (error) {
       console.error('Failed to read file:', error)
+      setFileError(`「${file.name}」读取失败，请检查文件格式`)
+    } finally {
+      setIsProcessingFile(false)
     }
   }, [])
 
@@ -1356,8 +1404,19 @@ export function Chat() {
               style={{ backgroundColor: `${T.mainBg}d9` }}
             >
               <p className="text-[12px] font-bold uppercase tracking-widest" style={{ color: T.accent }}>
-                拖放图片或文档到这里（PDF、DOCX、TXT、MD、JSON、CSV、XML）
+                拖放图片或文档到这里（PDF、DOCX、PPTX、TXT、MD、JSON、CSV、XML）
               </p>
+            </div>
+          )}
+
+          {/* 文件处理错误提示 */}
+          {fileError && (
+            <div
+              className="flex items-center justify-between text-[11px] px-2 py-1 mb-2 rounded-sm"
+              style={{ backgroundColor: `${T.warning}18`, color: T.warning }}
+            >
+              <span>{fileError}</span>
+              <button onClick={() => setFileError(null)} className="ml-2 opacity-70 hover:opacity-100">×</button>
             </div>
           )}
 
@@ -1437,19 +1496,26 @@ export function Chat() {
               >
                 {/* Upload — 图片/文档上传 */}
                 <label
-                  className="cursor-pointer transition-colors"
-                  title="上传图片或文档"
-                  onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+                  className="cursor-pointer transition-colors relative"
+                  title="上传图片或文档（支持 PDF、DOCX、PPTX、TXT、MD 等）"
+                  onMouseEnter={(e) => { if (!isProcessingFile) e.currentTarget.style.color = T.orange }}
+                  onMouseLeave={(e) => { if (!isProcessingFile) e.currentTarget.style.color = T.textMuted }}
+                  style={{ color: isProcessingFile ? T.accent : undefined }}
                 >
-                  <Upload size={18} strokeWidth={1.5} />
+                  {isProcessingFile ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin" style={{ color: T.accent }}>
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                  ) : (
+                    <Upload size={18} strokeWidth={1.5} />
+                  )}
                   <input
                     type="file"
-                    accept="image/*,.txt,.md,.markdown,.pdf,.docx,.json,.csv,.xml,.rtf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/json,text/csv,application/xml,text/xml,application/rtf"
+                    accept="image/*,.txt,.md,.markdown,.pdf,.docx,.pptx,.ppt,.json,.csv,.xml,.rtf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint,application/json,text/csv,application/xml,text/xml,application/rtf"
                     multiple
                     onChange={handleFileUpload}
                     className="hidden"
-                    disabled={!canEditInput}
+                    disabled={!canEditInput || isProcessingFile}
                   />
                 </label>
               </div>
