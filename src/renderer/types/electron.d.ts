@@ -14,6 +14,13 @@ export interface FileListResult {
   error?: string
 }
 
+export interface PdfExtractResult {
+  success: boolean
+  text?: string
+  pageCount?: number
+  error?: string
+}
+
 export interface ArchiveResult {
   success: boolean
   content?: string
@@ -75,6 +82,7 @@ export interface ElectronAPI {
     exists: (filePath: string) => Promise<boolean>
     mkdir: (dirPath: string) => Promise<FileResult>
     listDirectory: (dirPath: string) => Promise<FileListResult>
+    extractPdfText: (filePath: string) => Promise<PdfExtractResult>
   }
   archive: {
     read: (projectPath: string) => Promise<ArchiveResult>

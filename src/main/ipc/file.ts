@@ -1,5 +1,8 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
 
 export function registerFileHandlers() {
   // 选择目录
@@ -61,6 +64,18 @@ export function registerFileHandlers() {
     try {
       await fs.promises.mkdir(dirPath, { recursive: true })
       return { success: true }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  // PDF 文本提取（使用 pdf-parse，external 依赖，运行时由 Node.js 直接 require）
+  ipcMain.handle('file:extractPdfText', async (_event, filePath: string) => {
+    try {
+      const pdfParse = require('pdf-parse')
+      const buf = await fs.promises.readFile(filePath)
+      const data = await pdfParse(buf)
+      return { success: true, text: data.text as string, pageCount: data.numpages as number }
     } catch (error) {
       return { success: false, error: (error as Error).message }
     }

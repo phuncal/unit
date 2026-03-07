@@ -27,6 +27,14 @@ export default defineConfig({
     electron([
       {
         entry: 'src/main/index.ts',
+        vite: {
+          build: {
+            rollupOptions: {
+              // 不打包进 bundle，让 Electron 主进程在运行时直接 require
+              external: ['pdf-parse'],
+            },
+          },
+        },
         onstart(args) {
           // 启动前复制 preload
           const src = path.resolve(__dirname, 'src/main/preload.cjs')

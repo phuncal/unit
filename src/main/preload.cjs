@@ -18,6 +18,7 @@ const api = {
       return ipcRenderer.invoke('file:selectDirectory')
     },
     read: (filePath) => ipcRenderer.invoke('file:read', filePath),
+    extractPdfText: (filePath) => ipcRenderer.invoke('file:extractPdfText', filePath),
     write: (filePath, content) => ipcRenderer.invoke('file:write', filePath, content),
     append: (filePath, content) => ipcRenderer.invoke('file:append', filePath, content),
     exists: (filePath) => ipcRenderer.invoke('file:exists', filePath),

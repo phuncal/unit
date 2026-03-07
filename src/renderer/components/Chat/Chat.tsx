@@ -3,8 +3,6 @@ import React from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import mammoth from 'mammoth'
 import JSZip from 'jszip'
 
@@ -34,7 +32,6 @@ import {
 } from '@/types'
 import { ManualPanel } from '@/components/ManualPanel'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
 interface PendingDocument {
   id: string
@@ -210,17 +207,12 @@ function MarkdownRenderer({ content, highlightKeyword }: { content: string; high
 // PDF / DOCX extraction (module-level)
 // ============================================================
 async function extractPdfText(file: File): Promise<{ text: string; pageCount: number }> {
-  const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise
-  const pageCount = pdf.numPages
-  const pages = await Promise.all(
-    Array.from({ length: pageCount }, (_, i) =>
-      pdf.getPage(i + 1).then((p) => p.getTextContent()).then((tc) =>
-        tc.items.map((item: any) => ('str' in item ? item.str : '')).join(' ')
-      )
-    )
-  )
-  return { text: pages.join('\n\n'), pageCount }
+  // Electron 的 File 对象有 .path 属性，委托主进程（Node.js）解析，避免 file:// 协议下 Worker 限制
+  const filePath = (file as File & { path?: string }).path
+  if (!filePath) throw new Error('无法获取文件路径')
+  const result = await window.api.file.extractPdfText(filePath)
+  if (!result.success) throw new Error(`PDF 解析失败: ${result.error ?? '未知错误'}`)
+  return { text: result.text!, pageCount: result.pageCount! }
 }
 
 async function extractDocxText(file: File): Promise<{ text: string; wordCount: number }> {
