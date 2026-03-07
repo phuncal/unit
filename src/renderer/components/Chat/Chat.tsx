@@ -403,6 +403,7 @@ export function Chat() {
   const [archiveLoaded, setArchiveLoaded] = useState(false)
   const [archiveEntryCount, setArchiveEntryCount] = useState(0)
   const [showModelSwitcher, setShowModelSwitcher] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
   const [modelSearch, setModelSearch] = useState('')
   const [quickModelInput, setQuickModelInput] = useState(settings.modelName)
   const [quickManualInput, setQuickManualInput] = useState(false)
@@ -516,7 +517,7 @@ export function Chat() {
         const lastMsg = msgs[msgs.length - 1]
         if (lastMsg.role === 'assistant') {
           const text = lastMsg.content.filter((b) => b.type === 'text').map((b) => b.text || '').join('')
-          if (text.length > 500 && currentConversation.projectPath) {
+          if (text.length > 500) {
             setLongContentPrompt({ content: text, messageId: lastMsg.id })
             setExportFileName(`ai-response-${Date.now()}.md`)
           }
@@ -1195,89 +1196,97 @@ export function Chat() {
             <ChatSearch onHighlight={handleHighlight} />
           )}
 
-          {/* 导出 — group-hover 悬浮下拉，完全无背景 */}
+          {/* 导出 — 点击切换下拉 */}
           {messages.length > 0 && (
-            <div className="relative group">
-              {/* 触发图标：纯透明，strokeWidth 1.5，hover 橙 */}
+            <div className="relative">
               <button
                 className="flex items-center gap-0.5 transition-colors"
-                style={{ color: T.textMuted }}
+                style={{ color: showExportMenu ? T.orange : T.textMuted }}
                 onMouseEnter={(e) => (e.currentTarget.style.color = T.orange)}
-                onMouseLeave={(e) => (e.currentTarget.style.color = T.textMuted)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = showExportMenu ? T.orange : T.textMuted)}
                 title="导出"
+                onClick={() => setShowExportMenu((v) => !v)}
               >
                 <Download size={16} strokeWidth={1.5} />
                 <ChevronDown size={12} strokeWidth={1.5} />
               </button>
 
-              {/* 悬浮下拉面板 — group-hover 控制，无需 state */}
-              <div
-                className="absolute right-0 top-full mt-2 z-50 min-w-[160px] border py-1 rounded-sm opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity duration-150"
-                style={{
-                  backgroundColor: T.mainBg,
-                  borderColor: T.border,
-                  boxShadow: '0 8px 30px rgba(43,42,39,0.08)',
-                }}
-              >
-                {[
-                  {
-                    label: t('exportMarkdown'),
-                    action: async () => {
-                      const r = await exportAsMarkdown()
-                      if (r.success) pushToast('导出成功', 'success')
-                      else pushToast('导出失败: ' + r.error, 'error')
-                    },
-                  },
-                  {
-                    label: t('exportPinned'),
-                    action: async () => {
-                      const r = await exportAsMarkdown({ onlyPinned: true })
-                      if (r.success) pushToast('导出成功', 'success')
-                      else pushToast('导出失败: ' + r.error, 'error')
-                    },
-                  },
-                  {
-                    label: t('exportText'),
-                    action: async () => {
-                      const r = await exportAsText()
-                      if (r.success) pushToast('导出成功', 'success')
-                      else pushToast('导出失败: ' + r.error, 'error')
-                    },
-                  },
-                ].map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={item.action}
-                    className="w-full py-2 px-4 text-left text-[12px] transition-colors"
-                    style={{ color: T.textMuted }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = T.hoverBg; e.currentTarget.style.color = T.textPrimary }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = T.textMuted }}
+              {showExportMenu && (
+                <>
+                  {/* 点击空白关闭 */}
+                  <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+                  <div
+                    className="absolute right-0 top-full mt-1 z-50 min-w-[160px] border py-1 rounded-sm"
+                    style={{
+                      backgroundColor: T.mainBg,
+                      borderColor: T.border,
+                      boxShadow: '0 8px 30px rgba(43,42,39,0.12)',
+                    }}
                   >
-                    {item.label}
-                  </button>
-                ))}
-                {currentConversation.projectPath && (
-                  <>
-                    {/* 分割线 — 照搬原型，1px，border 色，opacity 0.5 */}
-                    <div className="h-[1px] w-full my-1" style={{ backgroundColor: T.border, opacity: 0.5 }} />
-                    <button
-                      onClick={async () => {
-                        const files = await listMdFiles()
-                        setMdFiles(files)
-                        setSelectedMdFile(files[0] || '')
-                        setDesignOutputName('design-' + Date.now() + '.md')
-                        setShowDesignDocPanel(true)
-                      }}
-                      className="w-full py-2 px-4 text-left text-[12px] transition-colors"
-                      style={{ color: T.textMuted }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = T.hoverBg; e.currentTarget.style.color = T.textPrimary }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = T.textMuted }}
-                    >
-                      {t('exportDesignDoc')}
-                    </button>
-                  </>
-                )}
-              </div>
+                    {[
+                      {
+                        label: t('exportMarkdown'),
+                        action: async () => {
+                          setShowExportMenu(false)
+                          const r = await exportAsMarkdown()
+                          if (r.success) pushToast('导出成功', 'success')
+                          else pushToast('导出失败: ' + r.error, 'error')
+                        },
+                      },
+                      {
+                        label: t('exportPinned'),
+                        action: async () => {
+                          setShowExportMenu(false)
+                          const r = await exportAsMarkdown({ onlyPinned: true })
+                          if (r.success) pushToast('导出成功', 'success')
+                          else pushToast('导出失败: ' + r.error, 'error')
+                        },
+                      },
+                      {
+                        label: t('exportText'),
+                        action: async () => {
+                          setShowExportMenu(false)
+                          const r = await exportAsText()
+                          if (r.success) pushToast('导出成功', 'success')
+                          else pushToast('导出失败: ' + r.error, 'error')
+                        },
+                      },
+                    ].map((item) => (
+                      <button
+                        key={item.label}
+                        onClick={item.action}
+                        className="w-full py-2 px-4 text-left text-[12px] transition-colors"
+                        style={{ color: T.textMuted }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = T.hoverBg; e.currentTarget.style.color = T.textPrimary }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = T.textMuted }}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                    {currentConversation.projectPath && (
+                      <>
+                        <div className="h-[1px] w-full my-1" style={{ backgroundColor: T.border, opacity: 0.5 }} />
+                        <button
+                          onClick={async () => {
+                            setShowExportMenu(false)
+                            const files = await listMdFiles()
+                            setMdFiles(files)
+                            setSelectedMdFile(files[0] || '')
+                            setDesignOutputName('design-' + Date.now() + '.md')
+                            setShowDesignDocPanel(true)
+                          }}
+                          className="w-full py-2 px-4 text-left text-[12px] transition-colors"
+                          style={{ color: T.textMuted }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = T.hoverBg; e.currentTarget.style.color = T.textPrimary }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = T.textMuted }}
+                        >
+                          {t('exportDesignDoc')}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
 

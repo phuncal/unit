@@ -16,7 +16,7 @@ import {
 } from '@/types'
 import { conversationDB } from '@/db'
 
-const STREAM_TIMEOUT_MS = 120000
+const STREAM_TIMEOUT_MS = 300000  // 5 分钟，适应 DeepSeek R1 等慢速长回复模型
 
 // 模块级 archive 内存缓存（跨渲染保留）
 let archiveCacheRef: { content: string; hash: string; conversationId: string } | null = null
@@ -33,6 +33,7 @@ export function useChat() {
   const appendStreamingContent = useConversationsStore((state) => state.appendStreamingContent)
   const clearStreamingContent = useConversationsStore((state) => state.clearStreamingContent)
   const updateConversationTokenCount = useConversationsStore((state) => state.updateConversationTokenCount)
+  const loadConversations = useConversationsStore((state) => state.loadConversations)
   const isStreaming = useConversationsStore((state) => state.isStreaming)
   const streamingContent = useConversationsStore((state) => state.streamingContent)
   const pushToast = useUIStore((state) => state.pushToast)
@@ -200,11 +201,20 @@ export function useChat() {
       setStreaming(true, '')
 
       let settled = false
-      const streamTimeout = window.setTimeout(() => {
+      const savePartialAndClear = async (hint: string) => {
+        const partial = streamingContent
+        clearStreamingContent()
+        if (partial.trim()) {
+          await addMessage('assistant', [{ type: 'text', text: partial + `\n\n*[${hint}]*` }])
+          await updateConversationTokenCount()
+        }
+      }
+
+      const streamTimeout = window.setTimeout(async () => {
         if (settled) return
         settled = true
-        clearStreamingContent()
-        pushToast('请求超时，请重试或切换模型。', 'error')
+        await savePartialAndClear('回复未完成，请求超时')
+        pushToast('请求超时，已保存已生成内容。', 'error')
       }, STREAM_TIMEOUT_MS)
 
       await sendChatMessage(
@@ -237,10 +247,11 @@ export function useChat() {
             // 8. 更新 token 计数
             await updateConversationTokenCount()
 
-            // 9. 写入累计费用统计
-            if (usage && currentConversation) {
-              const inputTokens = usage.promptTokens || 0
-              const outputTokens = usage.completionTokens || 0
+
+            // 9. 写入累计费用统计（仅当有 token 数据时）
+            const inputTokens = usage?.promptTokens || 0
+            const outputTokens = usage?.completionTokens || 0
+            if ((inputTokens > 0 || outputTokens > 0) && currentConversation) {
               const modelEntry = Object.entries(MODEL_PRICING).find(([name]) =>
                 settings.modelName.toLowerCase().includes(name.toLowerCase())
               )
@@ -248,16 +259,16 @@ export function useChat() {
                 ? (inputTokens * modelEntry[1].input + outputTokens * modelEntry[1].output) / 1000
                 : 0
               await conversationDB.updateUsageStats(currentConversation.id, inputTokens, outputTokens, cost)
+              // 刷新 store 中的对话列表，让费用统计 UI 立即看到更新
+              await loadConversations()
             }
           },
-          onError: (error) => {
+          onError: async (error) => {
             if (settled) return
             settled = true
             window.clearTimeout(streamTimeout)
             if (import.meta.env.DEV) console.error('Chat error:', error)
-            // 清除流式状态
-            clearStreamingContent()
-
+            await savePartialAndClear('回复中断')
             pushToast(`发送失败：${error.message}`, 'error')
           },
         },
@@ -267,7 +278,7 @@ export function useChat() {
       if (!settled) {
         settled = true
         window.clearTimeout(streamTimeout)
-        clearStreamingContent()
+        await savePartialAndClear('回复中断')
         pushToast('未收到模型响应，请重试。', 'error')
       }
     } catch (error) {

@@ -239,7 +239,8 @@ function formatMessages(
   messages: Message[],
   systemPrompt?: string,
   isAnthropic?: boolean,
-  archiveContent?: string
+  archiveContent?: string,
+  supportVision?: boolean
 ): ChatMessage[] {
   const formatted: ChatMessage[] = []
 
@@ -285,7 +286,7 @@ function formatMessages(
           type: 'text',
           text: block.text,
         })
-      } else if (block.type === 'image' && block.image) {
+      } else if (block.type === 'image' && block.image && supportVision !== false) {
         content.push({
           type: 'image_url',
           image_url: {
@@ -328,7 +329,7 @@ export async function sendChatMessage(
   }
 
   const isAnthropic = isAnthropicApi(settings.apiEndpoint)
-  const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic, archiveContent)
+  const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic, archiveContent, isVisionModel(settings.modelName))
   const cleanEndpoint = settings.apiEndpoint.replace(/\/+$/, '')
 
   const preferredMode = endpointModeCache.get(cleanEndpoint) || 'stream'
@@ -342,15 +343,16 @@ export async function sendChatMessage(
     try {
       if (mode === 'stream') {
         const streamResult = await new Promise<{ content: string; usage: StreamUsage }>((resolve, reject) => {
-          // 只有 OpenAI 原生 API 支持 stream_options
-          const isOpenaiNative = settings.apiEndpoint.includes('api.openai.com')
+          // OpenAI 及兼容 API（DeepSeek、Together 等）支持 stream_options；Anthropic 和 OpenRouter 不支持
+          const supportsStreamOptions = !isAnthropicApi(settings.apiEndpoint)
+            && !settings.apiEndpoint.includes('openrouter.ai')
           const requestBody: ChatRequestBody = {
             model: settings.modelName,
             messages: formattedMessages,
             max_tokens: settings.maxTokens,
             stream: true,
           }
-          if (isOpenaiNative) {
+          if (supportsStreamOptions) {
             requestBody.stream_options = { include_usage: true }
           }
 
@@ -568,7 +570,7 @@ export async function sendNonStreamMessage(
   archiveContent?: string
 ): Promise<string> {
   const isAnthropic = isAnthropicApi(settings.apiEndpoint)
-  const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic, archiveContent)
+  const formattedMessages = formatMessages(messages, systemPrompt, isAnthropic, archiveContent, isVisionModel(settings.modelName))
 
   const cleanEndpoint = settings.apiEndpoint.replace(/\/+$/, '')
   const url = `${cleanEndpoint}/chat/completions`
@@ -598,7 +600,15 @@ export async function sendNonStreamMessage(
 
 // 检查模型是否支持视觉
 export function isVisionModel(modelName: string): boolean {
-  const visionKeywords = ['vision', 'gpt-4o', 'gpt-4-turbo', 'claude-3', 'gemini', 'glm-4v']
+  const visionKeywords = [
+    'vision', 'vl',           // 通用视觉关键词
+    'gpt-4o', 'gpt-4-turbo',  // OpenAI
+    'claude-3',                // Anthropic Claude 3+
+    'claude-sonnet', 'claude-opus', 'claude-haiku', // Anthropic 系列默认支持
+    'gemini',                  // Google
+    'glm-4v',                  // 智谱
+    'qwen-vl',                 // 通义
+  ]
   const lowerName = modelName.toLowerCase()
   return visionKeywords.some((keyword) => lowerName.includes(keyword))
 }

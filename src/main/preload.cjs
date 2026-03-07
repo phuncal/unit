@@ -19,6 +19,7 @@ const api = {
     },
     read: (filePath) => ipcRenderer.invoke('file:read', filePath),
     extractPdfText: (filePath) => ipcRenderer.invoke('file:extractPdfText', filePath),
+    saveDialog: (defaultName, content) => ipcRenderer.invoke('file:saveDialog', defaultName, content),
     write: (filePath, content) => ipcRenderer.invoke('file:write', filePath, content),
     append: (filePath, content) => ipcRenderer.invoke('file:append', filePath, content),
     exists: (filePath) => ipcRenderer.invoke('file:exists', filePath),

@@ -3,7 +3,7 @@ import https from 'node:https'
 import http from 'node:http'
 
 const DEV_LOG = process.env.NODE_ENV !== 'production'
-const REQUEST_TIMEOUT_MS = 90000
+const REQUEST_TIMEOUT_MS = 300000  // 5 分钟，适应 DeepSeek R1 等长回复模型
 const httpsAgent = new https.Agent({
   keepAlive: true,
   maxSockets: 32,

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 
@@ -64,6 +64,22 @@ export function registerFileHandlers() {
     try {
       await fs.promises.mkdir(dirPath, { recursive: true })
       return { success: true }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  // 弹出原生存储对话框并写入文件
+  ipcMain.handle('file:saveDialog', async (_event, defaultName: string, content: string) => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+    const result = await dialog.showSaveDialog(win!, {
+      defaultPath: require('node:path').join(app.getPath('documents'), defaultName),
+      filters: [{ name: 'Markdown', extensions: ['md'] }, { name: '文本', extensions: ['txt'] }],
+    })
+    if (result.canceled || !result.filePath) return { success: false }
+    try {
+      await fs.promises.writeFile(result.filePath, content, 'utf-8')
+      return { success: true, filePath: result.filePath }
     } catch (error) {
       return { success: false, error: (error as Error).message }
     }

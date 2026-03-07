@@ -509,7 +509,7 @@ export function SettingsPanel() {
                 </span>
               </div>
               <input
-                type="range" min={1000} max={16000} step={100}
+                type="range" min={1000} max={32000} step={100}
                 value={localSettings.maxTokens}
                 onChange={(e) => setLocalSettings({ ...localSettings, maxTokens: parseInt(e.target.value) || DEFAULT_SETTINGS.maxTokens })}
               />

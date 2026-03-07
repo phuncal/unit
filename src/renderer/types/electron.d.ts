@@ -83,6 +83,7 @@ export interface ElectronAPI {
     mkdir: (dirPath: string) => Promise<FileResult>
     listDirectory: (dirPath: string) => Promise<FileListResult>
     extractPdfText: (filePath: string) => Promise<PdfExtractResult>
+    saveDialog: (defaultName: string, content: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
   }
   archive: {
     read: (projectPath: string) => Promise<ArchiveResult>

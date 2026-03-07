@@ -96,15 +96,34 @@ export type ModelsCacheByConnection = Partial<Record<ApiConnectionId, ModelsCach
 
 // 模型价格表（美元 / 1K tokens）
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'claude-sonnet-4-5': { input: 0.003, output: 0.015 },
-  'claude-opus-4-5': { input: 0.015, output: 0.075 },
-  'claude-3-5-sonnet': { input: 0.003, output: 0.015 },
-  'claude-3-opus': { input: 0.015, output: 0.075 },
-  'gpt-4o': { input: 0.0025, output: 0.01 },
-  'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
-  'gpt-4-turbo': { input: 0.01, output: 0.03 },
-  'gemini-1.5-pro': { input: 0.00125, output: 0.005 },
-  'gemini-1.5-flash': { input: 0.000075, output: 0.0003 },
+  // Anthropic Claude
+  'claude-sonnet-4-5':   { input: 0.003,    output: 0.015   },
+  'claude-opus-4-5':     { input: 0.015,    output: 0.075   },
+  'claude-3-5-sonnet':   { input: 0.003,    output: 0.015   },
+  'claude-3-5-haiku':    { input: 0.0008,   output: 0.004   },
+  'claude-3-opus':       { input: 0.015,    output: 0.075   },
+  'claude-3-sonnet':     { input: 0.003,    output: 0.015   },
+  'claude-3-haiku':      { input: 0.00025,  output: 0.00125 },
+  // OpenAI
+  'gpt-4o':              { input: 0.0025,   output: 0.01    },
+  'gpt-4o-mini':         { input: 0.00015,  output: 0.0006  },
+  'gpt-4-turbo':         { input: 0.01,     output: 0.03    },
+  'o1':                  { input: 0.015,    output: 0.06    },
+  'o1-mini':             { input: 0.003,    output: 0.012   },
+  'o3-mini':             { input: 0.0011,   output: 0.0044  },
+  // DeepSeek
+  'deepseek-reasoner':   { input: 0.00055,  output: 0.00219 }, // R1
+  'deepseek-r1':         { input: 0.00055,  output: 0.00219 }, // R1 别名
+  'deepseek-chat':       { input: 0.00027,  output: 0.0011  }, // V3
+  'deepseek-v3':         { input: 0.00027,  output: 0.0011  }, // V3 别名
+  // Google Gemini
+  'gemini-1.5-pro':      { input: 0.00125,  output: 0.005   },
+  'gemini-1.5-flash':    { input: 0.000075, output: 0.0003  },
+  'gemini-2.0-flash':    { input: 0.0001,   output: 0.0004  },
+  // 通义千问
+  'qwen-max':            { input: 0.0024,   output: 0.0048  },
+  'qwen-plus':           { input: 0.0004,   output: 0.0012  },
+  'qwen-turbo':          { input: 0.0002,   output: 0.0006  },
 }
 
 const DEFAULT_CONNECTION_TEMPLATES: Array<
@@ -188,7 +207,7 @@ export const DEFAULT_SETTINGS: Settings = {
   modelName: DEFAULT_CONNECTIONS[0].modelName,
   activeConnectionId: DEFAULT_CONNECTIONS[0].id,
   apiConnections: DEFAULT_CONNECTIONS,
-  maxTokens: 4096,
+  maxTokens: 8192,
   contextLimit: 100000,
   slidingWindowSize: 20,
   replyStyle: 'standard',

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, safeStorage, nativeImage, Menu, clipboard } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -73,6 +73,54 @@ function createWindow() {
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+
+  // 右键菜单：可编辑区域 + 有选中文字时
+  win.webContents.on('context-menu', (_event, params) => {
+    const { isEditable, selectionText, editFlags } = params
+    const hasSelection = selectionText.trim().length > 0
+
+    if (!isEditable && !hasSelection) return
+
+    const template: Electron.MenuItemConstructorOptions[] = []
+
+    if (isEditable) {
+      template.push(
+        { label: '撤销', role: 'undo', enabled: editFlags.canUndo },
+        { label: '重做', role: 'redo', enabled: editFlags.canRedo },
+        { type: 'separator' },
+      )
+    }
+
+    template.push(
+      { label: '剪切', role: 'cut', enabled: isEditable && editFlags.canCut },
+      { label: '复制', role: 'copy', enabled: editFlags.canCopy || hasSelection },
+      { label: '粘贴', role: 'paste', enabled: isEditable && editFlags.canPaste },
+    )
+
+    if (isEditable) {
+      // 粘贴为纯文本：去除富文本格式
+      const clipText = clipboard.readText()
+      template.push({
+        label: '粘贴为纯文本',
+        enabled: isEditable && clipText.length > 0,
+        click: () => win?.webContents.insertText(clipText),
+      })
+      template.push(
+        { type: 'separator' },
+        { label: '全选', role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: '清空输入框',
+          enabled: true,
+          click: () => win?.webContents.executeJavaScript(
+            `(()=>{ const el = document.activeElement; if(el && (el.tagName==='TEXTAREA'||el.tagName==='INPUT')){ el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); } })()`
+          ),
+        },
+      )
+    }
+
+    Menu.buildFromTemplate(template).popup({ window: win! })
+  })
 
   win.on('closed', () => {
     win = null
